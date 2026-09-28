@@ -4,4 +4,76 @@ Code for the practicals of *IA simbólica* (Máster Universitario en Inteligenci
 2026/27): a knowledge-based agent that prescribes safely for patients with several conditions,
 built over one shared drug formulary and patient database (`data/`).
 
-This README is completed as the modules land (install, run and test instructions).
+## Install
+
+```bash
+conda env create -f environment.yml          # creates the `symai` environment, editable install
+# after a change to environment.yml or pyproject.toml:
+conda env update -f environment.yml --prune
+```
+
+Check the install:
+
+```bash
+conda run -n symai python -c "import aima.logic, symbolic_ai; print('ok')"
+```
+
+## Run — EJ1, the SAT prescribing agent
+
+```bash
+conda activate symai
+
+python -m symbolic_ai.p1_ej1_logic.main --encounter E001
+python -m symbolic_ai.p1_ej1_logic.main --all
+python -m symbolic_ai.p1_ej1_logic.main --all --first-value true        # textbook DPLL value ordering
+python -m symbolic_ai.p1_ej1_logic.main --encounter E004 --no-classify  # skip essential/excluded/optional
+python -m symbolic_ai.p1_ej1_logic.main --all --json outputs/decisions.json
+python -m symbolic_ai.p1_ej1_logic.main --all --data-dir /path/to/data
+
+# equivalently, the console script declared in pyproject.toml:
+symai-ej1 --all
+```
+
+See `docs/SPECIFICATIONS/EJ1-sat/README.md` for the problem (axioms A1-A6, the worked example of
+Elena and Pablo, Γ⁺/Γ⁻ and the lemma) and `docs/SPECIFICATIONS/EJ1-sat/solver-choice.md` for why
+the agent calls `aima.logic.dpll` directly, with `T_d` tried false first by default.
+
+## Test
+
+```bash
+pytest -m "not slow"                              # fast suite, run often
+pytest                                             # full suite (includes the brute-force checks)
+pytest -m "not integration"                        # skip the real-database test (needs data/ + the dataloader)
+ruff format --check src/symbolic_ai tests && ruff check src/symbolic_ai tests
+mypy
+python -m symbolic_ai.dataloader.validate          # once the dataloader is implemented
+```
+
+## Layout
+
+```
+symnbolic_ai_project/
+├── pyproject.toml, environment.yml   package metadata, dependencies, tool configuration
+├── data/                             the formulary and patient database (01-database.md)
+├── outputs/                          run artefacts (JSON), git-ignored, recreated by main.py
+├── src/
+│   ├── aima/                         vendored aima-python (read-only; see src/aima/VENDORED.md)
+│   └── symbolic_ai/
+│       ├── dataloader/               the only reader of data/
+│       ├── p1_ej1_logic/             EJ1: the SAT prescribing agent (this practical's core)
+│       ├── p1_ej2_ontology/          EJ2: placeholder
+│       └── p1_ej3_search/            EJ3: placeholder
+└── tests/                            mirrors src/symbolic_ai/
+```
+
+`docs/SPECIFICATIONS/02-code-architecture.md` (private TFM repository) is the full design
+reference for this layout and for `p1_ej1_logic`'s file roles.
+
+## Credits
+
+- **aima-python**, https://github.com/aimacode/aima-python, commit
+  `f104e03fdc1582f014b3a4c93f1a9b7d2da70114`, MIT licence — vendored unmodified in `src/aima/`
+  (`src/aima/VENDORED.md`). `symbolic_ai.p1_ej1_logic.solver.DPLLSolver` wraps `aima.logic.dpll`
+  (Fig. 7.17 of *Artificial Intelligence: A Modern Approach*).
+- Russell, S., Norvig, P. *Artificial Intelligence: A Modern Approach*, 4th ed., 2022 — §7.6.1
+  (DPLL, value ordering), §7.7 (knowledge-based agents).
