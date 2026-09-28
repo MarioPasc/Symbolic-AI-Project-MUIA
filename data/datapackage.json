@@ -1,0 +1,232 @@
+{
+  "name": "symbolic-ai-course-database",
+  "title": "Symbolic AI course database: formulary and patients",
+  "profile": "tabular-data-package",
+  "version": "1.0.0",
+  "resources": [
+    {
+      "name": "conditions",
+      "path": "formulary/conditions.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "condition_id", "type": "string", "constraints": { "required": true, "pattern": "^[A-Z0-9]+$" } },
+          { "name": "name_es", "type": "string", "constraints": { "required": true } },
+          { "name": "name_en", "type": "string", "constraints": { "required": true } },
+          { "name": "icd10", "type": "string" },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["condition_id"]
+      }
+    },
+    {
+      "name": "drugs",
+      "path": "formulary/drugs.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "drug_id", "type": "string", "constraints": { "required": true, "pattern": "^[a-z][a-z0-9_]*$" } },
+          { "name": "name_es", "type": "string", "constraints": { "required": true } },
+          { "name": "name_en", "type": "string", "constraints": { "required": true } },
+          { "name": "atc_code", "type": "string" },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["drug_id"]
+      }
+    },
+    {
+      "name": "risk_factors",
+      "path": "formulary/risk_factors.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "risk_factor_id", "type": "string", "constraints": { "required": true, "pattern": "^[A-Z0-9]+$" } },
+          { "name": "name_es", "type": "string", "constraints": { "required": true } },
+          { "name": "name_en", "type": "string", "constraints": { "required": true } },
+          { "name": "definition", "type": "string" },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["risk_factor_id"]
+      }
+    },
+    {
+      "name": "candidates",
+      "path": "formulary/candidates.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "condition_id", "type": "string", "constraints": { "required": true } },
+          { "name": "drug_id", "type": "string", "constraints": { "required": true } },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["condition_id", "drug_id"],
+        "foreignKeys": [
+          { "fields": "condition_id", "reference": { "resource": "conditions", "fields": "condition_id" } },
+          { "fields": "drug_id", "reference": { "resource": "drugs", "fields": "drug_id" } }
+        ]
+      }
+    },
+    {
+      "name": "adverse_interactions",
+      "path": "formulary/adverse_interactions.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "drug_a", "type": "string", "constraints": { "required": true } },
+          { "name": "drug_b", "type": "string", "constraints": { "required": true } },
+          { "name": "effect", "type": "string", "constraints": { "required": true } },
+          { "name": "severity", "type": "string", "constraints": { "required": true, "enum": ["major", "moderate", "minor"] } },
+          { "name": "source", "type": "string" },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["drug_a", "drug_b"],
+        "foreignKeys": [
+          { "fields": "drug_a", "reference": { "resource": "drugs", "fields": "drug_id" } },
+          { "fields": "drug_b", "reference": { "resource": "drugs", "fields": "drug_id" } }
+        ]
+      }
+    },
+    {
+      "name": "contraindications",
+      "path": "formulary/contraindications.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "risk_factor_id", "type": "string", "constraints": { "required": true } },
+          { "name": "drug_id", "type": "string", "constraints": { "required": true } },
+          { "name": "reason", "type": "string", "constraints": { "required": true } },
+          { "name": "source", "type": "string" },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["risk_factor_id", "drug_id"],
+        "foreignKeys": [
+          { "fields": "risk_factor_id", "reference": { "resource": "risk_factors", "fields": "risk_factor_id" } },
+          { "fields": "drug_id", "reference": { "resource": "drugs", "fields": "drug_id" } }
+        ]
+      }
+    },
+    {
+      "name": "coprescriptions",
+      "path": "formulary/coprescriptions.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "drug_id", "type": "string", "constraints": { "required": true } },
+          { "name": "risk_factor_id", "type": "string", "constraints": { "required": true } },
+          { "name": "companion_drug_id", "type": "string", "constraints": { "required": true } },
+          { "name": "reason", "type": "string", "constraints": { "required": true } },
+          { "name": "source", "type": "string" },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["drug_id", "risk_factor_id", "companion_drug_id"],
+        "foreignKeys": [
+          { "fields": "drug_id", "reference": { "resource": "drugs", "fields": "drug_id" } },
+          { "fields": "risk_factor_id", "reference": { "resource": "risk_factors", "fields": "risk_factor_id" } },
+          { "fields": "companion_drug_id", "reference": { "resource": "drugs", "fields": "drug_id" } }
+        ]
+      }
+    },
+    {
+      "name": "drug_classes",
+      "path": "formulary/drug_classes.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "class_id", "type": "string", "constraints": { "required": true, "pattern": "^[a-z][a-z0-9_]*$" } },
+          { "name": "name_es", "type": "string", "constraints": { "required": true } },
+          { "name": "name_en", "type": "string", "constraints": { "required": true } },
+          { "name": "parent_class_id", "type": "string" },
+          { "name": "atc_code", "type": "string" },
+          { "name": "exclusive", "type": "boolean", "constraints": { "required": true } },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["class_id"],
+        "foreignKeys": [
+          { "fields": "parent_class_id", "reference": { "resource": "", "fields": "class_id" } }
+        ]
+      }
+    },
+    {
+      "name": "drug_class_members",
+      "path": "formulary/drug_class_members.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "drug_id", "type": "string", "constraints": { "required": true } },
+          { "name": "class_id", "type": "string", "constraints": { "required": true } },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["drug_id", "class_id"],
+        "foreignKeys": [
+          { "fields": "drug_id", "reference": { "resource": "drugs", "fields": "drug_id" } },
+          { "fields": "class_id", "reference": { "resource": "drug_classes", "fields": "class_id" } }
+        ]
+      }
+    },
+    {
+      "name": "patients",
+      "path": "patients/patients.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "patient_id", "type": "string", "constraints": { "required": true, "pattern": "^P[0-9]{3}$" } },
+          { "name": "alias", "type": "string", "constraints": { "required": true } },
+          { "name": "sex", "type": "string", "constraints": { "required": true, "enum": ["F", "M"] } }
+        ],
+        "primaryKey": ["patient_id"]
+      }
+    },
+    {
+      "name": "encounters",
+      "path": "patients/encounters.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "encounter_id", "type": "string", "constraints": { "required": true, "pattern": "^E[0-9]{3}$" } },
+          { "name": "patient_id", "type": "string", "constraints": { "required": true } },
+          { "name": "seq", "type": "integer", "constraints": { "required": true, "minimum": 1 } },
+          { "name": "visit_date", "type": "date", "constraints": { "required": true } },
+          { "name": "age_years", "type": "integer", "constraints": { "required": true, "minimum": 0 } },
+          { "name": "note", "type": "string" }
+        ],
+        "primaryKey": ["encounter_id"],
+        "foreignKeys": [
+          { "fields": "patient_id", "reference": { "resource": "patients", "fields": "patient_id" } }
+        ]
+      }
+    },
+    {
+      "name": "encounter_conditions",
+      "path": "patients/encounter_conditions.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "encounter_id", "type": "string", "constraints": { "required": true } },
+          { "name": "condition_id", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["encounter_id", "condition_id"],
+        "foreignKeys": [
+          { "fields": "encounter_id", "reference": { "resource": "encounters", "fields": "encounter_id" } },
+          { "fields": "condition_id", "reference": { "resource": "conditions", "fields": "condition_id" } }
+        ]
+      }
+    },
+    {
+      "name": "encounter_risk_factors",
+      "path": "patients/encounter_risk_factors.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "encounter_id", "type": "string", "constraints": { "required": true } },
+          { "name": "risk_factor_id", "type": "string", "constraints": { "required": true } },
+          { "name": "status", "type": "string", "constraints": { "required": true, "enum": ["present", "absent", "unknown"] } }
+        ],
+        "primaryKey": ["encounter_id", "risk_factor_id"],
+        "foreignKeys": [
+          { "fields": "encounter_id", "reference": { "resource": "encounters", "fields": "encounter_id" } },
+          { "fields": "risk_factor_id", "reference": { "resource": "risk_factors", "fields": "risk_factor_id" } }
+        ]
+      }
+    }
+  ]
+}

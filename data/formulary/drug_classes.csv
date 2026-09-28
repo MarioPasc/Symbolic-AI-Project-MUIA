@@ -1,0 +1,6 @@
+class_id,name_es,name_en,parent_class_id,atc_code,exclusive,since
+analgesics,Analgésicos,Analgesics,,,true,1.0.0
+anticoagulants,Anticoagulantes,Anticoagulants,,B01A,true,1.0.0
+antidepressants,Antidepresivos,Antidepressants,,N06A,true,1.0.0
+beta_blockers,Betabloqueantes,Beta blockers,,C07,true,1.0.0
+raas_blockers,Bloqueantes del SRAA (IECA/ARA-II),RAAS blockers (ACEI/ARB),,C09,true,1.0.0

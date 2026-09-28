@@ -1,0 +1,7 @@
+condition_id,name_es,name_en,icd10,since
+AF,Fibrilación auricular,Atrial fibrillation,I48,1.0.0
+DEP,Depresión,Depression,F32,1.0.0
+GERD,Enfermedad por reflujo gastroesofágico,Gastro-oesophageal reflux disease,K21,1.0.0
+HTN,Hipertensión arterial,Hypertension,I10,1.0.0
+PAIN,Dolor crónico,Chronic pain,R52.2,1.0.0
+T2D,Diabetes mellitus tipo 2,Type 2 diabetes mellitus,E11,1.0.0
