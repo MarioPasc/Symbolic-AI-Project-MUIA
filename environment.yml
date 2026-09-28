@@ -1,0 +1,20 @@
+# Conda environment for the whole practical. Create: conda env create -f environment.yml
+# Update after a change:            conda env update -f environment.yml --prune
+name: symai
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  # runtime: imports of the vendored aima-python (src/aima)
+  - numpy
+  - networkx
+  - ipython
+  - sortedcontainers
+  # development
+  - pytest
+  - pytest-cov
+  - ruff
+  - mypy
+  - pip
+  - pip:
+      - -e .

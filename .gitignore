@@ -218,3 +218,8 @@ __marimo__/
 .streamlit/secrets.toml
 
 docs/
+# Agent worktrees and notes (orchestration), local only
+.claude/
+
+# Run artefacts, recreated by the code
+outputs/
