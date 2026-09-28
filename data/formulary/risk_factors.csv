@@ -1,0 +1,7 @@
+risk_factor_id,name_es,name_en,definition,since
+AGE65,Edad de 65 años o más,Age 65 or older,age_years >= 65,1.0.0
+ASTHMA,Asma,Asthma,diagnosed asthma,1.0.0
+CKD,Enfermedad renal crónica avanzada,Advanced chronic kidney disease,eGFR < 30 mL/min/1.73 m2 (stages G4-G5),1.0.0
+EPI,Epilepsia,Epilepsy,diagnosed epilepsy,1.0.0
+LIVER,Hepatopatía grave,Severe liver disease,Child-Pugh class C,1.0.0
+PREG,Embarazo,Pregnancy,confirmed pregnancy,1.0.0

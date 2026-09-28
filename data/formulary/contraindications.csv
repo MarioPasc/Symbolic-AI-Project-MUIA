@@ -1,0 +1,12 @@
+risk_factor_id,drug_id,reason,source,since
+ASTHMA,propranolol,"bronchospasm, non-selective beta blocker",,1.0.0
+CKD,gliclazide,hypoglycaemia,,1.0.0
+CKD,hydrochlorothiazide,ineffective at low eGFR,,1.0.0
+CKD,ibuprofen,nephrotoxicity,,1.0.0
+CKD,metformin,lactic acidosis,,1.0.0
+EPI,tramadol,lowers the seizure threshold,,1.0.0
+LIVER,paracetamol,hepatotoxicity,,1.0.0
+PREG,apixaban,no safety data in pregnancy,,1.0.0
+PREG,enalapril,fetotoxicity,,1.0.0
+PREG,losartan,fetotoxicity,,1.0.0
+PREG,warfarin,teratogenicity,,1.0.0
