@@ -34,19 +34,19 @@ python -m symbolic_ai.p1_ej1_logic.main --all --data-dir /path/to/data
 symai-ej1 --all
 ```
 
-See `docs/SPECIFICATIONS/EJ1-sat/README.md` for the problem (axioms A1-A6, the worked example of
-Elena and Pablo, Γ⁺/Γ⁻ and the lemma) and `docs/SPECIFICATIONS/EJ1-sat/solver-choice.md` for why
-the agent calls `aima.logic.dpll` directly, with `T_d` tried false first by default.
+The problem (axioms A1-A6, the bounds Γ⁺/Γ⁻, the decision rule) and the reasons the agent calls
+`aima.logic.dpll` directly, with `T_d` tried false first by default, are in the report (EJ1,
+Methodology) and in the team's design notes, which are kept outside this repository.
 
 ## Test
 
 ```bash
 pytest -m "not slow"                              # fast suite, run often
 pytest                                             # full suite (includes the brute-force checks)
-pytest -m "not integration"                        # skip the real-database test (needs data/ + the dataloader)
+pytest -m "not integration"                        # skip the tests that read the real database
 ruff format --check src/symbolic_ai tests && ruff check src/symbolic_ai tests
 mypy
-python -m symbolic_ai.dataloader.validate          # once the dataloader is implemented
+python -m symbolic_ai.dataloader.validate          # check data/ against its schema and rules
 ```
 
 ## Layout
