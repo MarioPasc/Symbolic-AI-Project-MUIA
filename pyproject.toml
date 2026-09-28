@@ -30,7 +30,7 @@ include = ["symbolic_ai*", "aima*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers"
+addopts = "-ra --strict-markers --import-mode=importlib"
 markers = [
     "integration: reads the real database under data/",
     "slow: takes more than 5 seconds",
