@@ -1,0 +1,12 @@
+drug_id,class_id,since
+apixaban,anticoagulants,1.0.0
+bisoprolol,beta_blockers,1.0.0
+enalapril,raas_blockers,1.0.0
+ibuprofen,analgesics,1.0.0
+losartan,raas_blockers,1.0.0
+mirtazapine,antidepressants,1.0.0
+paracetamol,analgesics,1.0.0
+propranolol,beta_blockers,1.0.0
+sertraline,antidepressants,1.0.0
+tramadol,analgesics,1.0.0
+warfarin,anticoagulants,1.0.0

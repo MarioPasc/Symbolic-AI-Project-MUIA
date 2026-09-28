@@ -1,0 +1,8 @@
+drug_a,drug_b,effect,severity,source,since
+apixaban,ibuprofen,bleeding,major,,1.0.0
+bisoprolol,verapamil,"bradycardia, AV block",major,,1.0.0
+ibuprofen,sertraline,gastrointestinal bleeding,major,,1.0.0
+ibuprofen,warfarin,bleeding,major,,1.0.0
+propranolol,verapamil,"bradycardia, AV block",major,,1.0.0
+sertraline,tramadol,serotonin syndrome,major,,1.0.0
+sertraline,warfarin,bleeding,major,,1.0.0
