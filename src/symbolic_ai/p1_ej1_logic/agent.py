@@ -51,11 +51,22 @@ class DrugClassification(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class SatCall:
-    """One SAT call made while deciding, kept for the explanation trace."""
+    """One SAT call made while deciding, kept for the explanation trace.
+
+    ``calls``, ``decisions`` and ``failures`` are the DPLL effort counts of
+    :class:`~symbolic_ai.p1_ej1_logic.solver.SolveResult`.
+    """
 
     name: str
     satisfiable: bool
     calls: int
+    decisions: int = 0
+    failures: int = 0
+
+    @classmethod
+    def of(cls, name: str, result: SolveResult) -> SatCall:
+        """Record ``result`` under ``name``."""
+        return cls(name, result.satisfiable, result.calls, result.decisions, result.failures)
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,14 +139,14 @@ class PrescribingAgent:
 
         plus_clauses = gamma_plus(base, unknowns)
         plus_result = self._solver.solve(plus_clauses)
-        trace.append(SatCall("SAT(Gamma+)", plus_result.satisfiable, plus_result.calls))
+        trace.append(SatCall.of("SAT(Gamma+)", plus_result))
 
         if plus_result.satisfiable:
             return self._prescribe(plus_clauses, plus_result, trace)
 
         minus_clauses = gamma_minus(base, unknowns)
         minus_result = self._solver.solve(minus_clauses)
-        trace.append(SatCall("SAT(Gamma-)", minus_result.satisfiable, minus_result.calls))
+        trace.append(SatCall.of("SAT(Gamma-)", minus_result))
 
         if minus_result.satisfiable:
             return self._request_test(base, unknowns, trace)
@@ -172,9 +183,7 @@ class PrescribingAgent:
                 Clause((Literal(symbol, positive=False),), _AxiomTag.ASSUMPTION, drug_id),
             )
             not_d_result = self._solver.solve(not_d)
-            trace.append(
-                SatCall(f"SAT(Gamma+ & ~T_{drug_id})", not_d_result.satisfiable, not_d_result.calls)
-            )
+            trace.append(SatCall.of(f"SAT(Gamma+ & ~T_{drug_id})", not_d_result))
             essential = not not_d_result.satisfiable
 
             d_true = (
@@ -182,11 +191,7 @@ class PrescribingAgent:
                 Clause((Literal(symbol, positive=True),), _AxiomTag.ASSUMPTION, drug_id),
             )
             d_true_result = self._solver.solve(d_true)
-            trace.append(
-                SatCall(
-                    f"SAT(Gamma+ & T_{drug_id})", d_true_result.satisfiable, d_true_result.calls
-                )
-            )
+            trace.append(SatCall.of(f"SAT(Gamma+ & T_{drug_id})", d_true_result))
             excluded = not d_true_result.satisfiable
 
             if essential:
@@ -205,7 +210,7 @@ class PrescribingAgent:
         for u in sorted(unknowns):
             u_clauses = gamma_u(base, unknowns, u)
             u_result = self._solver.solve(u_clauses)
-            trace.append(SatCall(f"SAT(Gamma_{u})", u_result.satisfiable, u_result.calls))
+            trace.append(SatCall.of(f"SAT(Gamma_{u})", u_result))
             if u_result.satisfiable:
                 qualifying.append(u)
         tests = (qualifying[0],) if qualifying else tuple(sorted(unknowns))

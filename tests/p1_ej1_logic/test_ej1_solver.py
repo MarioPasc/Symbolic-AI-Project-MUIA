@@ -80,3 +80,31 @@ class TestBranchingHeuristic:
         solver = DPLLSolver(decision_first_value=False, decision_prefix="X_")
         assert solver.branching_heuristic([Expr("X_foo")], [])[1] is False
         assert solver.branching_heuristic([Expr("T_foo")], [])[1] is True
+
+
+class TestEffortCounters:
+    def test_refutation_by_unit_propagation_has_no_decision(self) -> None:
+        result = DPLLSolver().solve([_clause(("A", True)), _clause(("A", False))])
+        assert result.satisfiable is False
+        assert result.decisions == 0
+        assert result.failures == result.calls
+
+    def test_satisfiable_without_backtracking_has_no_failure(self) -> None:
+        result = DPLLSolver().solve(
+            [_clause(("A", True), ("B", True)), _clause(("A", False), ("B", False))]
+        )
+        assert result.satisfiable is True
+        assert result.decisions == 1
+        assert result.failures == 0
+
+    def test_backtracking_is_counted_as_failures(self) -> None:
+        # T_a = False (tried first) forces T_b both ways; DPLL must backtrack to T_a = True.
+        clauses = [
+            _clause(("T_a", True), ("T_b", True)),
+            _clause(("T_a", True), ("T_b", False)),
+            _clause(("T_a", False), ("T_b", False)),
+        ]
+        result = DPLLSolver(decision_first_value=False).solve(clauses)
+        assert result.model == {"T_a": True, "T_b": False}
+        assert result.decisions == 1
+        assert result.failures > 0
