@@ -13,6 +13,8 @@ dependencies = [
     # Imports of the vendored aima-python (src/aima): utils -> numpy, logic -> networkx,
     # agents -> IPython, csp -> sortedcontainers.
     "numpy>=1.26",
+    # Report figures (symbolic_ai.viz, p1_ej1_logic.plot).
+    "matplotlib>=3.8",
     "networkx>=3.2",
     "ipython>=8.0",
     "sortedcontainers>=2.4",
@@ -53,7 +55,8 @@ convention = "numpy"
 "tests/**" = ["D"]
 
 [tool.mypy]
-python_version = "3.11"
+# The conda env pins Python 3.12, and numpy >= 2.5 ships stubs that only parse as 3.12.
+python_version = "3.12"
 strict = true
 mypy_path = "src"
 packages = ["symbolic_ai"]

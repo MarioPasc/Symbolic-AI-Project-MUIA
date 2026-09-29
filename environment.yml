@@ -10,6 +10,8 @@ dependencies:
   - networkx
   - ipython
   - sortedcontainers
+  # report figures (symbolic_ai.viz)
+  - matplotlib
   # development
   - pytest
   - pytest-cov
