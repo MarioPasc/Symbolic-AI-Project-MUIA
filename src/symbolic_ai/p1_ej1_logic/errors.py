@@ -1,4 +1,4 @@
-"""Exceptions raised by the EJ1 propositional prescribing agent."""
+"""Exceptions raised by the EJ1 propositional prescribing agent and its experiments."""
 
 from __future__ import annotations
 
@@ -23,6 +23,18 @@ class LemmaPreconditionError(EJ1Error):
         self.violations = violations
         message = f"{len(violations)} lemma precondition violation(s):\n" + "\n".join(violations)
         super().__init__(message)
+
+
+class OracleError(EJ1Error):
+    """The reference oracle cannot enumerate the regimens of a formulary (too many drugs)."""
+
+
+class ExplanationError(EJ1Error):
+    """A minimal unsatisfiable subset was requested for a satisfiable set of clauses."""
+
+
+class ResultsFormatError(EJ1Error):
+    """A saved results file lacks a field the figures need, or has the wrong type or schema."""
 
 
 class CertificateError(EJ1Error):
