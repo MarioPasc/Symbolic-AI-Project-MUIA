@@ -34,6 +34,20 @@ python -m symbolic_ai.p1_ej1_logic.main --all --data-dir /path/to/data
 symai-ej1 --all
 ```
 
+### The experiments of the report (EJ1, *Resultados*)
+
+```bash
+python -m symbolic_ai.p1_ej1_logic.main --experiments --workers 8   # scenarios, exhaustive check, value ordering
+python -m symbolic_ai.p1_ej1_logic.main --plot outputs/ej1/results.json   # redraw the figure only
+```
+
+`--experiments` writes `outputs/ej1/results.json` (schema `symai.ej1.results/1`) and
+`outputs/ej1/fig_ej1_value_ordering.{pdf,png}`. The run is deterministic: the files are byte-identical for any
+`--workers` (about 1.5 min with 20 processes, about 20 min with one). It decides the five encounters of the
+database, checks the agent on all 45,927 possible clinical records against an independent oracle
+(`p1_ej1_logic/semantics.py`, the axioms evaluated on sets of drugs), and compares DPLL's two value orderings with
+the oracle's minimum regimen.
+
 The problem (axioms A1-A6, the bounds Γ⁺/Γ⁻, the decision rule) and the reasons the agent calls
 `aima.logic.dpll` directly, with `T_d` tried false first by default, are in the report (EJ1,
 Methodology) and in the team's design notes, which are kept outside this repository.
@@ -55,11 +69,12 @@ python -m symbolic_ai.dataloader.validate          # check data/ against its sch
 symnbolic_ai_project/
 ├── pyproject.toml, environment.yml   package metadata, dependencies, tool configuration
 ├── data/                             the formulary and patient database (01-database.md)
-├── outputs/                          run artefacts (JSON), git-ignored, recreated by main.py
+├── outputs/                          run artefacts (JSON, figures), git-ignored, recreated by main.py
 ├── src/
 │   ├── aima/                         vendored aima-python (read-only; see src/aima/VENDORED.md)
 │   └── symbolic_ai/
 │       ├── dataloader/               the only reader of data/
+│       ├── viz/                      shared IEEE figure style for every exercise
 │       ├── p1_ej1_logic/             EJ1: the SAT prescribing agent (this practical's core)
 │       ├── p1_ej2_ontology/          EJ2: placeholder
 │       └── p1_ej3_search/            EJ3: placeholder
@@ -77,3 +92,8 @@ reference for this layout and for `p1_ej1_logic`'s file roles.
   (Fig. 7.17 of *Artificial Intelligence: A Modern Approach*).
 - Russell, S., Norvig, P. *Artificial Intelligence: A Modern Approach*, 4th ed., 2022 — §7.6.1
   (DPLL, value ordering), §7.7 (knowledge-based agents).
+- Marques-Silva, J. "Minimal unsatisfiability: models, algorithms and applications", ISMVL 2010, pp. 9–14,
+  doi:10.1109/ISMVL.2010.11 — deletion-based extraction of minimal unsatisfiable subsets
+  (`p1_ej1_logic/explain.py`).
+- Figure style (`src/symbolic_ai/viz/style.py`): matplotlib; Paul Tol's *bright* colour-blind-safe palette
+  (P. Tol, "Colour schemes", SRON technical note SRON/EPS/TN/09-002).
