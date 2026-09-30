@@ -4,7 +4,7 @@ The agent reasons over the CNF encoding of :mod:`symbolic_ai.p1_ej1_logic.encodi
 module restates the six axioms as the report's prose defines them, directly on a regimen (a set of
 drugs), and enumerates every regimen of the formulary. It shares only the formulary data with the
 agent (no clause, no CNF, no solver), so an error in the encoding, in the solver wrapper or in the
-decision rule shows up as a disagreement with it. It is used to verify the agent and to measure
+decision rule shows up as a disagreement with it. It is used to check DPLL's verdicts and to measure
 what DPLL cannot give (model counts and minimum regimen sizes).
 """
 

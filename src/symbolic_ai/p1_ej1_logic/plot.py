@@ -24,7 +24,7 @@ VALUE_ORDERING_FIGURE = "fig_ej1_value_ordering"
 #: Bars shorter than this fraction of the tallest one are labelled with their count.
 _LABEL_BELOW = 0.4
 
-#: The P3 configurations drawn, in legend order: (results key, label, colour, marker).
+#: The P2 configurations drawn, in legend order: (results key, label, colour, marker).
 _ORDERINGS = (
     ("false_first", "Falso primero", TOL["blue"], "o"),
     ("true_first", "Verdadero primero", TOL["red"], "s"),
@@ -32,7 +32,7 @@ _ORDERINGS = (
 
 
 def plot_value_ordering(value_ordering: Mapping[str, object], out_stem: Path) -> tuple[Path, ...]:
-    """Draw Fig. 1 of EJ1: redundant drugs under each DPLL configuration of experiment P3.
+    """Draw Fig. 1 of EJ1: redundant drugs under each DPLL configuration of experiment P2.
 
     The excess of a regimen is its number of drugs minus the oracle's minimum for the same record.
     Panel (a): mean excess by number of present conditions. Panel (b): number of satisfiable
@@ -41,7 +41,7 @@ def plot_value_ordering(value_ordering: Mapping[str, object], out_stem: Path) ->
     Parameters
     ----------
     value_ordering : Mapping[str, object]
-        The ``value_ordering`` section of ``results.json`` (schema ``symai.ej1.results/1``).
+        The ``value_ordering`` section of ``results.json`` (schema ``symai.ej1.results/3``).
     out_stem : Path
         Output path without extension; a PDF and a PNG are written.
 

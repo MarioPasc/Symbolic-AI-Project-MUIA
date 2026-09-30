@@ -29,10 +29,6 @@ class OracleError(EJ1Error):
     """The reference oracle cannot enumerate the regimens of a formulary (too many drugs)."""
 
 
-class ExplanationError(EJ1Error):
-    """A minimal unsatisfiable subset was requested for a satisfiable set of clauses."""
-
-
 class ResultsFormatError(EJ1Error):
     """A saved results file lacks a field the figures need, or has the wrong type or schema."""
 

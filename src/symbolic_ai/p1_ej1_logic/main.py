@@ -33,11 +33,9 @@ from symbolic_ai.p1_ej1_logic.experiments import (
     PatternsResult,
     ScenarioResult,
     ValueOrderingResult,
-    VerificationResult,
     as_jsonable,
     run_scenarios,
     run_value_ordering,
-    run_verification,
     untreatable_patterns,
 )
 from symbolic_ai.p1_ej1_logic.plot import VALUE_ORDERING_FIGURE, plot_value_ordering
@@ -47,7 +45,7 @@ from symbolic_ai.p1_ej1_logic.solver import AIMA_PYTHON_COMMIT
 __all__ = ["RESULTS_SCHEMA", "build_arg_parser", "main"]
 
 #: Identifier and version of the layout of ``results.json``; bump it when a field changes meaning.
-RESULTS_SCHEMA = "symai.ej1.results/1"
+RESULTS_SCHEMA = "symai.ej1.results/3"
 #: The command recorded in the results' provenance (worker count and output directory do not
 #: change the results, so they are not part of it).
 _EXPERIMENTS_COMMAND = "python -m symbolic_ai.p1_ej1_logic.main --experiments"
@@ -85,7 +83,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     selection.add_argument(
         "--experiments",
         action="store_true",
-        help="Run the report's experiments (scenarios, exhaustive verification, value ordering) "
+        help="Run the report's experiments (scenarios; DPLL verdicts and value ordering) "
         "and write results.json and the figure to --out-dir.",
     )
     selection.add_argument(
@@ -248,14 +246,13 @@ def _provenance(formulary: Formulary) -> dict[str, object]:
 
 
 def _experiment_results(args: argparse.Namespace, formulary: Formulary) -> dict[str, object]:
-    """Run P1-P3 and the untreatable patterns; return the content of ``results.json``."""
+    """Run P1, P2 and the untreatable patterns; return the content of ``results.json``."""
     encounters = load_encounters(data_dir=args.data_dir)
     space = RegimenSpace(formulary)
     scenarios = run_scenarios(formulary, [encounters[k] for k in sorted(encounters)], space)
-    verification = run_verification(formulary, space, workers=args.workers)
     value_ordering = run_value_ordering(formulary, space, workers=args.workers)
     patterns = untreatable_patterns(formulary, space)
-    _print_summary(scenarios, verification, value_ordering, patterns)
+    _print_summary(scenarios, value_ordering, patterns)
     return {
         "schema": RESULTS_SCHEMA,
         "provenance": _provenance(formulary),
@@ -265,7 +262,6 @@ def _experiment_results(args: argparse.Namespace, formulary: Formulary) -> dict[
             "regimens_satisfying_a3_a6": space.n_candidate_regimens,
         },
         "scenarios": as_jsonable(scenarios),
-        "verification": as_jsonable(verification),
         "value_ordering": as_jsonable(value_ordering),
         "untreatable_patterns": as_jsonable(patterns),
     }
@@ -273,7 +269,6 @@ def _experiment_results(args: argparse.Namespace, formulary: Formulary) -> dict[
 
 def _print_summary(
     scenarios: Sequence[ScenarioResult],
-    verification: VerificationResult,
     value_ordering: ValueOrderingResult,
     patterns: PatternsResult,
 ) -> None:
@@ -283,16 +278,15 @@ def _print_summary(
         output = ", ".join(s.regimen or s.tests) or "-"
         print(
             f"  {s.encounter_id}: {s.action} [{output}] "
-            f"Gamma+ {s.gamma_plus_models} models, Gamma- {s.gamma_minus_models} models, "
-            f"conflict of {len(s.conflict)} clauses"
+            f"Gamma+ {s.gamma_plus_models} models, Gamma- {s.gamma_minus_models} models"
         )
     print(
-        f"P2 verification: {verification.n_records} records, {verification.actions}, "
-        f"{len(verification.disagreements)} disagreement(s)"
+        f"P2 verdicts: {value_ordering.n_instances} bases, agree with the oracle: "
+        f"{value_ordering.verdicts_agree_with_oracle}"
     )
     for summary in value_ordering.orderings:
         print(
-            f"P3 {summary.ordering}: minimal in {summary.n_minimal}/{summary.n_satisfiable}, "
+            f"P2 {summary.ordering}: minimal in {summary.n_minimal}/{summary.n_satisfiable}, "
             f"mean excess {summary.mean_excess}, max {summary.max_excess}, "
             f"mean DPLL calls {summary.mean_calls}"
         )

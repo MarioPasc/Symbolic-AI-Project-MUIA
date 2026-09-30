@@ -30,12 +30,10 @@ from symbolic_ai.p1_ej1_logic.errors import (
     CertificateError,
     EJ1Error,
     EncodingError,
-    ExplanationError,
     LemmaPreconditionError,
     OracleError,
     ResultsFormatError,
 )
-from symbolic_ai.p1_ej1_logic.explain import minimal_unsatisfiable_subset
 from symbolic_ai.p1_ej1_logic.semantics import FullRecord, RegimenSpace
 from symbolic_ai.p1_ej1_logic.solver import DPLLSolver, SolveResult
 
@@ -53,7 +51,6 @@ __all__ = [
     "DrugClassification",
     "EJ1Error",
     "EncodingError",
-    "ExplanationError",
     "FullRecord",
     "LemmaPreconditionError",
     "Literal",
@@ -70,7 +67,6 @@ __all__ = [
     "gamma_minus",
     "gamma_plus",
     "gamma_u",
-    "minimal_unsatisfiable_subset",
     "percept_clauses",
     "symbol_for_condition",
     "symbol_for_drug",

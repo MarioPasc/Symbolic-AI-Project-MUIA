@@ -1,4 +1,4 @@
-"""Tests for symbolic_ai.p1_ej1_logic.experiments: P1-P3 and the untreatable patterns."""
+"""Tests for symbolic_ai.p1_ej1_logic.experiments: P1, P2 and the untreatable patterns."""
 
 from __future__ import annotations
 
@@ -17,13 +17,11 @@ from symbolic_ai.dataloader.models import (
     RiskStatus,
 )
 from symbolic_ai.p1_ej1_logic import experiments
-from symbolic_ai.p1_ej1_logic.agent import Action, Decision, PrescribingAgent
 from symbolic_ai.p1_ej1_logic.encoding import gamma
 from symbolic_ai.p1_ej1_logic.experiments import (
     as_jsonable,
     run_scenarios,
     run_value_ordering,
-    run_verification,
     untreatable_patterns,
 )
 from symbolic_ai.p1_ej1_logic.semantics import RegimenSpace
@@ -57,7 +55,7 @@ class TestScenarios:
         }
 
     @pytest.mark.parametrize(
-        ("encounter_id", "action", "plus", "minus", "output", "conflict_size"),
+        ("encounter_id", "action", "plus", "minus", "output"),
         [
             (
                 "E001",
@@ -65,12 +63,11 @@ class TestScenarios:
                 115,
                 1645,
                 ("amlodipine", "linagliptin", "mirtazapine", "tramadol", "warfarin"),
-                0,
             ),
-            ("E002", "request_test", 0, 94, ("PREG",), 5),
-            ("E003", "prescribe", 94, 94, ("amlodipine", "warfarin"), 0),
-            ("E004", "prescribe", 1, 1, ("ibuprofen", "mirtazapine", "omeprazole"), 0),
-            ("E005", "refer", 0, 0, (), 8),
+            ("E002", "request_test", 0, 94, ("PREG",)),
+            ("E003", "prescribe", 94, 94, ("amlodipine", "warfarin")),
+            ("E004", "prescribe", 1, 1, ("ibuprofen", "mirtazapine", "omeprazole")),
+            ("E005", "refer", 0, 0, ()),
         ],
     )
     def test_reference_row(
@@ -81,13 +78,11 @@ class TestScenarios:
         plus: int,
         minus: int,
         output: tuple[str, ...],
-        conflict_size: int,
     ) -> None:
         row = results[encounter_id]
         assert row.action == action
         assert (row.gamma_plus_models, row.gamma_minus_models) == (plus, minus)
         assert (row.regimen or row.tests) == output
-        assert len(row.conflict) == conflict_size
 
     def test_true_first_adds_losartan_on_e001(
         self, results: dict[str, experiments.ScenarioResult]
@@ -110,33 +105,6 @@ class TestScenarios:
         assert json.loads(text)[0]["encounter_id"] == "E001"
 
 
-class TestVerification:
-    def test_agent_agrees_with_oracle_on_every_mini_record(
-        self, elena_formulary: Formulary
-    ) -> None:
-        result = run_verification(elena_formulary, RegimenSpace(elena_formulary))
-        assert result.n_records == (2**3 - 1) * 3**2
-        assert result.disagreements == ()
-        assert sum(result.actions.values()) == result.n_records
-
-    def test_a_wrong_decision_is_reported(
-        self, elena_formulary: Formulary, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        class ReferringAgent(PrescribingAgent):
-            def decide(self, encounter: Encounter) -> Decision:
-                decision = super().decide(encounter)
-                return Decision(Action.REFER, trace=decision.trace)
-
-        monkeypatch.setattr(experiments, "PrescribingAgent", ReferringAgent)
-        result = run_verification(elena_formulary, RegimenSpace(elena_formulary))
-        checks = {d.check for d in result.disagreements}
-        assert {"C2", "C4"} <= checks
-
-    def test_workers_below_one_raise(self, elena_formulary: Formulary) -> None:
-        with pytest.raises(ValueError, match="workers"):
-            run_verification(elena_formulary, RegimenSpace(elena_formulary), workers=0)
-
-
 class TestValueOrdering:
     def test_result_does_not_depend_on_workers(self, elena_formulary: Formulary) -> None:
         space = RegimenSpace(elena_formulary)
@@ -146,7 +114,7 @@ class TestValueOrdering:
         assert sequential.verdicts_agree_with_oracle
 
     def test_false_first_is_not_minimal_in_general(self) -> None:
-        """Counterexample of results-design.md §3-P3: false-first returns {b, c}, {a} suffices."""
+        """Counterexample (results-design.md §3-P3): false-first returns {b, c}, {a} suffices."""
         formulary = _multi_indication_formulary()
         result = run_value_ordering(formulary, RegimenSpace(formulary))
         both = next(i for i in result.instances if i.conditions == ("X", "Y"))

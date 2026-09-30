@@ -71,9 +71,10 @@ def test_cli_experiments_reproduce_the_report(tmp_path: Path) -> None:
     assert main(["--experiments", "--workers", workers, "--out-dir", str(tmp_path)]) == 0
     results = json.loads((tmp_path / "results.json").read_text())
     assert results["schema"] == RESULTS_SCHEMA
-    verification = results["verification"]
-    assert verification["n_records"] == 45_927
-    assert verification["disagreements"] == []
+    assert "verification" not in results
+    ordering = results["value_ordering"]
+    assert (ordering["n_instances"], ordering["n_satisfiable"]) == (4032, 2752)
+    assert ordering["verdicts_agree_with_oracle"] is True
     assert [s["action"] for s in results["scenarios"]] == [
         "prescribe",
         "request_test",

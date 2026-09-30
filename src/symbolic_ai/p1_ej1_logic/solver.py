@@ -73,7 +73,7 @@ class DPLLSolver:
     reverse_symbol_order : bool
         ``False`` (default) branches over the symbols in alphabetical order, the agent's order;
         ``True`` uses the reverse order, only to measure how much the returned regimen depends
-        on the variable order (the report's experiment P3).
+        on the variable order (a test of the report's experiment P2).
     """
 
     def __init__(

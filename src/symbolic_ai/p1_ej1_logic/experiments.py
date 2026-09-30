@@ -1,11 +1,12 @@
-"""EJ1 experiments of the report's *Resultados*: scenarios, exhaustive verification, value ordering.
+"""EJ1 experiments of the report's *Resultados*: scenarios (P1), verdicts and value ordering (P2).
 
-P1 runs the agent on the encounters of the database and explains each unsatisfiable bound with a
-minimal unsatisfiable subset. P2 runs it on every possible clinical record and checks each decision
-against the reference oracle of :mod:`symbolic_ai.p1_ej1_logic.semantics`. P3 compares the regimen
-size under DPLL's two value orderings with the oracle's minimum. :func:`untreatable_patterns`
-finds the minimal records the formulary cannot treat. Every function is deterministic and returns
-frozen dataclasses; ``main.py`` loads the data, calls them and writes the results.
+P1 runs the agent on the encounters of the database and counts the models of its bounds. P2
+solves Γ of every fully observed record, checks DPLL's verdict against the reference oracle of
+:mod:`symbolic_ai.p1_ej1_logic.semantics` (every base the agent queries is one of these records up
+to clause order), and compares the regimen size under DPLL's two value orderings with the
+oracle's minimum. :func:`untreatable_patterns` finds the minimal records the formulary cannot
+treat. Every function is deterministic and returns frozen dataclasses; ``main.py`` loads the
+data, calls them and writes the results.
 """
 
 from __future__ import annotations
@@ -16,27 +17,18 @@ from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date
-from itertools import chain, combinations, product, repeat
+from itertools import chain, combinations, repeat
 from typing import TypeVar
 
 from symbolic_ai.dataloader.models import Encounter, Formulary, RiskStatus
-from symbolic_ai.p1_ej1_logic.agent import Action, Decision, PrescribingAgent, SatCall
-from symbolic_ai.p1_ej1_logic.encoding import (
-    Clause,
-    gamma,
-    gamma_minus,
-    gamma_plus,
-    unknown_risk_factors,
-)
+from symbolic_ai.p1_ej1_logic.agent import Action, PrescribingAgent, SatCall
+from symbolic_ai.p1_ej1_logic.encoding import gamma, unknown_risk_factors
 from symbolic_ai.p1_ej1_logic.errors import EJ1Error
-from symbolic_ai.p1_ej1_logic.explain import minimal_unsatisfiable_subset
 from symbolic_ai.p1_ej1_logic.semantics import FullRecord, RegimenSpace
 from symbolic_ai.p1_ej1_logic.solver import DPLLSolver
 
 __all__ = [
     "CONFIGURATIONS",
-    "ConflictClause",
-    "Disagreement",
     "OrderingSummary",
     "PatternsResult",
     "ScenarioResult",
@@ -44,11 +36,9 @@ __all__ = [
     "UntreatablePattern",
     "ValueOrderingInstance",
     "ValueOrderingResult",
-    "VerificationResult",
     "as_jsonable",
     "run_scenarios",
     "run_value_ordering",
-    "run_verification",
     "untreatable_patterns",
 ]
 
@@ -56,31 +46,21 @@ _R = TypeVar("_R")
 
 _SYNTHETIC_DATE = date(2026, 1, 1)
 
-#: P3's DPLL configurations: (name, value tried first for T_d, reverse the alphabetical symbol
+#: P2's DPLL configurations: (name, value tried first for T_d, reverse the alphabetical symbol
 #: order). The agent uses the first; the second is the textbook value ordering. Both keep the
 #: agent's alphabetical symbol order.
 CONFIGURATIONS: tuple[tuple[str, bool, bool], ...] = (
     ("false_first", False, False),
     ("true_first", True, False),
 )
-_STATUSES = (RiskStatus.PRESENT, RiskStatus.ABSENT, RiskStatus.UNKNOWN)
 
 
 # --- result records ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
-class ConflictClause:
-    """One clause of a minimal unsatisfiable subset: its axiom tag, source entry and text."""
-
-    axiom: str
-    source: str
-    clause: str
-
-
-@dataclass(frozen=True, slots=True)
 class ScenarioResult:
-    """P1: the agent's decision on one encounter, with the oracle's counts and the explanation.
+    """P1: the agent's decision on one encounter, with the oracle's model counts.
 
     Parameters
     ----------
@@ -100,9 +80,6 @@ class ScenarioResult:
         The oracle's smallest model of Γ⁺ (PRESCRIBE only).
     regimen_true_first : tuple[str, ...]
         The regimen of the same agent with DPLL trying ``T_d = True`` first (PRESCRIBE only).
-    conflict : tuple[ConflictClause, ...]
-        A minimal unsatisfiable subset of the bound that decided the action: Γ⁺ for
-        REQUEST_TEST, Γ⁻ for REFER; empty for PRESCRIBE.
     trace : tuple[SatCall, ...]
         The agent's SAT calls with their DPLL effort counts.
     """
@@ -121,57 +98,12 @@ class ScenarioResult:
     tests: tuple[str, ...]
     minimum_regimen_size: int | None
     regimen_true_first: tuple[str, ...]
-    conflict: tuple[ConflictClause, ...]
     trace: tuple[SatCall, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class Disagreement:
-    """P2: one check the agent failed on one record (the list is expected to be empty)."""
-
-    record: str
-    check: str
-    detail: str
-
-
-@dataclass(frozen=True, slots=True)
-class VerificationResult:
-    """P2: the agent against the oracle on a set of records.
-
-    Parameters
-    ----------
-    n_records : int
-        Records decided.
-    actions : dict[str, int]
-        Records per action.
-    actions_by_n_unknown : dict[str, dict[str, int]]
-        Records per number of unknown risk factors (as a string key) and action.
-    single_test_requests, all_test_requests : int
-        REQUEST_TEST decisions naming one test (some Γ_u satisfiable) or every unknown.
-    sat_calls_checked : int
-        C1: SAT calls of the agent compared with the oracle's verdict.
-    prescribe_completions_checked : int
-        C3: (regimen, completion of U) pairs checked against A1-A6 (property (i)).
-    refer_completions_checked : int
-        C4: completions of U checked to admit no regimen (property (ii)).
-    disagreements : tuple[Disagreement, ...]
-        Every failed check (C1-C5).
-    """
-
-    n_records: int
-    actions: dict[str, int]
-    actions_by_n_unknown: dict[str, dict[str, int]]
-    single_test_requests: int
-    all_test_requests: int
-    sat_calls_checked: int
-    prescribe_completions_checked: int
-    refer_completions_checked: int
-    disagreements: tuple[Disagreement, ...]
-
-
-@dataclass(frozen=True, slots=True)
 class ValueOrderingInstance:
-    """P3: one fully observed record solved by DPLL in each configuration of :data:`CONFIGURATIONS`.
+    """P2: one fully observed record solved by DPLL in each configuration of :data:`CONFIGURATIONS`.
 
     Sizes are ``None`` when Γ is unsatisfiable. ``calls``, ``decisions`` and ``failures`` are the
     counts of :class:`~symbolic_ai.p1_ej1_logic.solver.SolveResult`.
@@ -193,7 +125,7 @@ class ValueOrderingInstance:
 
 @dataclass(frozen=True, slots=True)
 class OrderingSummary:
-    """P3: aggregates of one DPLL configuration over the satisfiable instances (and its effort)."""
+    """P2: aggregates of one DPLL configuration over the satisfiable instances (and its effort)."""
 
     ordering: str
     n_satisfiable: int
@@ -212,7 +144,7 @@ class OrderingSummary:
 
 @dataclass(frozen=True, slots=True)
 class SizeByConditions:
-    """P3: mean regimen size by number of present conditions, over satisfiable instances."""
+    """P2: mean regimen size by number of present conditions, over satisfiable instances."""
 
     n_conditions: int
     n_satisfiable: int
@@ -223,7 +155,7 @@ class SizeByConditions:
 
 @dataclass(frozen=True, slots=True)
 class ValueOrderingResult:
-    """P3: every fully observed record, and the aggregates the report quotes."""
+    """P2: every fully observed record, and the aggregates the report quotes."""
 
     n_instances: int
     n_satisfiable: int
@@ -270,14 +202,6 @@ def _subsets(items: Iterable[str], *, non_empty: bool = False) -> list[frozenset
     ]
 
 
-def _describe(conditions: Iterable[str], present: Iterable[str], unknown: Iterable[str]) -> str:
-    """Describe a record compactly and in sorted order, for disagreement messages."""
-    return (
-        f"conditions={'+'.join(sorted(conditions))}; present={'+'.join(sorted(present)) or '-'}; "
-        f"unknown={'+'.join(sorted(unknown)) or '-'}"
-    )
-
-
 def _synthetic_encounter(conditions: frozenset[str], statuses: dict[str, RiskStatus]) -> Encounter:
     """Build an encounter for a generated record; only conditions and statuses matter."""
     return Encounter(
@@ -308,18 +232,13 @@ def _map(
         return list(executor.map(function, repeat(formulary), repeat(space), tasks))
 
 
-def _sorted_counter(counter: Counter[str]) -> dict[str, int]:
-    """Return ``counter`` as a plain ``dict`` with sorted keys (stable JSON)."""
-    return {key: counter[key] for key in sorted(counter)}
-
-
 # --- P1: scenarios ----------------------------------------------------------------------------
 
 
 def run_scenarios(
     formulary: Formulary, encounters: Sequence[Encounter], space: RegimenSpace
 ) -> tuple[ScenarioResult, ...]:
-    """P1: decide each encounter, count the models of its bounds and explain its UNSAT bound.
+    """P1: decide each encounter and count the models of its bounds with the oracle.
 
     Parameters
     ----------
@@ -335,14 +254,12 @@ def run_scenarios(
     tuple[ScenarioResult, ...]
         One result per encounter, in the given order.
     """
-    false_first = DPLLSolver(decision_first_value=False)
-    agent = PrescribingAgent(formulary, false_first, classify=False)
+    agent = PrescribingAgent(formulary, DPLLSolver(decision_first_value=False), classify=False)
     textbook_agent = PrescribingAgent(
         formulary, DPLLSolver(decision_first_value=True), classify=False
     )
     return tuple(
-        _scenario(formulary, space, agent, textbook_agent, false_first, encounter)
-        for encounter in encounters
+        _scenario(formulary, space, agent, textbook_agent, encounter) for encounter in encounters
     )
 
 
@@ -351,7 +268,6 @@ def _scenario(
     space: RegimenSpace,
     agent: PrescribingAgent,
     textbook_agent: PrescribingAgent,
-    solver: DPLLSolver,
     encounter: Encounter,
 ) -> ScenarioResult:
     """P1 for one encounter."""
@@ -361,13 +277,6 @@ def _scenario(
     decision = agent.decide(encounter)
     textbook = textbook_agent.decide(encounter)
     plus_record = FullRecord(conditions, present | unknowns)
-
-    base = gamma(formulary, encounter)
-    conflict: tuple[Clause, ...] = ()
-    if decision.action is Action.REQUEST_TEST:
-        conflict = minimal_unsatisfiable_subset(gamma_plus(base, unknowns), solver)
-    elif decision.action is Action.REFER:
-        conflict = minimal_unsatisfiable_subset(gamma_minus(base, unknowns), solver)
 
     prescribes = decision.action is Action.PRESCRIBE
     return ScenarioResult(
@@ -385,222 +294,17 @@ def _scenario(
         tests=decision.tests,
         minimum_regimen_size=space.minimum_size(plus_record) if prescribes else None,
         regimen_true_first=tuple(sorted(textbook.regimen)) if prescribes else (),
-        conflict=tuple(ConflictClause(c.axiom.value, c.source, str(c)) for c in conflict),
         trace=decision.trace,
     )
 
 
-# --- P2: exhaustive verification ----------------------------------------------------------------
-
-
-@dataclass(slots=True)
-class _Tally:
-    """Mutable counters of one verification worker, frozen into a VerificationResult at the end."""
-
-    n_records: int = 0
-    actions: Counter[str] = field(default_factory=Counter)
-    by_unknown: dict[int, Counter[str]] = field(default_factory=dict)
-    single_test: int = 0
-    all_tests: int = 0
-    sat_calls: int = 0
-    prescribe_completions: int = 0
-    refer_completions: int = 0
-    disagreements: list[Disagreement] = field(default_factory=list)
-
-
-class _CountCache:
-    """Memoised oracle counts for one worker (many records share the same bounds)."""
-
-    def __init__(self, space: RegimenSpace, conditions: frozenset[str]) -> None:
-        self._space = space
-        self._conditions = conditions
-        self._counts: dict[frozenset[str], int] = {}
-
-    def satisfiable(self, present: frozenset[str]) -> bool:
-        """Whether some regimen satisfies A1-A6 with exactly ``present`` risk factors present."""
-        if present not in self._counts:
-            self._counts[present] = self._space.count(FullRecord(self._conditions, present))
-        return self._counts[present] > 0
-
-
-def run_verification(
-    formulary: Formulary, space: RegimenSpace, workers: int = 1
-) -> VerificationResult:
-    """P2: decide every record with at least one condition and check it against the oracle.
-
-    A record fixes the present conditions (closed world) and gives every risk factor one of the
-    statuses present, absent or unknown: ``(2**|C| - 1) * 3**|R|`` records. Checks per record:
-    C1 each SAT call of the trace agrees with the oracle; C2 the action is the oracle's; C3 a
-    prescribed regimen satisfies A1-A6 under every completion of U (property (i)); C4 after REFER
-    no completion admits a regimen (property (ii)); C5 the requested test follows the rule
-    (the first u with Γ_u satisfiable, or every unknown).
-
-    Parameters
-    ----------
-    formulary : Formulary
-        The formulary the agent reasons with.
-    space : RegimenSpace
-        The oracle over ``formulary``.
-    workers : int
-        Number of processes; ``1`` runs sequentially. The result does not depend on it.
-
-    Returns
-    -------
-    VerificationResult
-        Counts over all records and the (expected empty) list of disagreements.
-
-    Raises
-    ------
-    ValueError
-        If ``workers`` is smaller than 1.
-    """
-    tasks = _subsets(formulary.condition_ids, non_empty=True)
-    tallies = _map(_verify_conditions, formulary, space, tasks, workers)
-    return _merge_tallies(tallies)
-
-
-def _verify_conditions(
-    formulary: Formulary, space: RegimenSpace, conditions: frozenset[str]
-) -> _Tally:
-    """P2 for every risk-factor status assignment of one condition set (one worker task)."""
-    agent = PrescribingAgent(formulary, DPLLSolver(), classify=False)
-    cache = _CountCache(space, conditions)
-    tally = _Tally()
-    risk_ids = formulary.risk_factor_ids
-    for statuses in product(_STATUSES, repeat=len(risk_ids)):
-        by_risk = dict(zip(risk_ids, statuses, strict=True))
-        decision = agent.decide(_synthetic_encounter(conditions, by_risk))
-        present = frozenset(r for r, s in by_risk.items() if s is RiskStatus.PRESENT)
-        unknowns = frozenset(r for r, s in by_risk.items() if s is RiskStatus.UNKNOWN)
-        _check_record(space, cache, tally, decision, (conditions, present, unknowns))
-    return tally
-
-
-def _check_record(
-    space: RegimenSpace,
-    cache: _CountCache,
-    tally: _Tally,
-    decision: Decision,
-    record: tuple[frozenset[str], frozenset[str], frozenset[str]],
-) -> None:
-    """Run checks C1-C5 on one decision and add the outcome to ``tally``."""
-    conditions, present, unknowns = record
-    label = _describe(conditions, present, unknowns)
-    action = decision.action
-    tally.n_records += 1
-    tally.actions[action.value] += 1
-    tally.by_unknown.setdefault(len(unknowns), Counter())[action.value] += 1
-
-    for call in decision.trace:
-        tally.sat_calls += 1
-        expected = cache.satisfiable(_bound_of_call(call.name, present, unknowns))
-        if call.satisfiable != expected:
-            tally.disagreements.append(
-                Disagreement(label, "C1", f"{call.name}: {call.satisfiable}")
-            )
-
-    expected_action = _oracle_action(cache, present, unknowns)
-    if action is not expected_action:
-        tally.disagreements.append(
-            Disagreement(label, "C2", f"{action.value} != {expected_action}")
-        )
-
-    completions = [present | extra for extra in _subsets(unknowns)]
-    if action is Action.PRESCRIBE:
-        for completion in completions:
-            tally.prescribe_completions += 1
-            if not space.is_valid(FullRecord(conditions, completion), decision.regimen):
-                detail = (
-                    f"regimen {sorted(decision.regimen)} fails with present={sorted(completion)}"
-                )
-                tally.disagreements.append(Disagreement(label, "C3", detail))
-    elif action is Action.REFER:
-        for completion in completions:
-            tally.refer_completions += 1
-            if cache.satisfiable(completion):
-                tally.disagreements.append(Disagreement(label, "C4", f"{sorted(completion)} SAT"))
-    else:
-        _check_test_request(cache, tally, decision, present, unknowns, label)
-
-
-def _check_test_request(
-    cache: _CountCache,
-    tally: _Tally,
-    decision: Decision,
-    present: frozenset[str],
-    unknowns: frozenset[str],
-    label: str,
-) -> None:
-    """C5: the requested test is the first u whose Γ_u is satisfiable, or every unknown."""
-    sufficient = [u for u in sorted(unknowns) if cache.satisfiable(present | (unknowns - {u}))]
-    expected = (sufficient[0],) if sufficient else tuple(sorted(unknowns))
-    if sufficient:
-        tally.single_test += 1
-    else:
-        tally.all_tests += 1
-    if decision.tests != expected:
-        tally.disagreements.append(Disagreement(label, "C5", f"{decision.tests} != {expected}"))
-
-
-def _bound_of_call(name: str, present: frozenset[str], unknowns: frozenset[str]) -> frozenset[str]:
-    """Return the present risk factors assumed by the SAT call ``name`` of the trace."""
-    if name == "SAT(Gamma+)":
-        return present | unknowns
-    if name == "SAT(Gamma-)":
-        return present
-    prefix, suffix = "SAT(Gamma_", ")"
-    if name.startswith(prefix) and name.endswith(suffix):
-        tested = name[len(prefix) : -len(suffix)]
-        if tested in unknowns:
-            return present | (unknowns - {tested})
-    raise EJ1Error(f"unexpected SAT call in the agent's trace: {name}")
-
-
-def _oracle_action(cache: _CountCache, present: frozenset[str], unknowns: frozenset[str]) -> Action:
-    """Evaluate the decision rule of Algorithm 1 with the oracle instead of DPLL."""
-    if cache.satisfiable(present | unknowns):
-        return Action.PRESCRIBE
-    if cache.satisfiable(present):
-        return Action.REQUEST_TEST
-    return Action.REFER
-
-
-def _merge_tallies(tallies: Iterable[_Tally]) -> VerificationResult:
-    """Sum the worker tallies into one :class:`VerificationResult`."""
-    total = _Tally()
-    for tally in tallies:
-        total.n_records += tally.n_records
-        total.actions.update(tally.actions)
-        for n_unknown, counter in tally.by_unknown.items():
-            total.by_unknown.setdefault(n_unknown, Counter()).update(counter)
-        total.single_test += tally.single_test
-        total.all_tests += tally.all_tests
-        total.sat_calls += tally.sat_calls
-        total.prescribe_completions += tally.prescribe_completions
-        total.refer_completions += tally.refer_completions
-        total.disagreements.extend(tally.disagreements)
-    return VerificationResult(
-        n_records=total.n_records,
-        actions=_sorted_counter(total.actions),
-        actions_by_n_unknown={
-            str(k): _sorted_counter(total.by_unknown[k]) for k in sorted(total.by_unknown)
-        },
-        single_test_requests=total.single_test,
-        all_test_requests=total.all_tests,
-        sat_calls_checked=total.sat_calls,
-        prescribe_completions_checked=total.prescribe_completions,
-        refer_completions_checked=total.refer_completions,
-        disagreements=tuple(total.disagreements),
-    )
-
-
-# --- P3: value ordering -----------------------------------------------------------------------
+# --- P2: verdicts and value ordering --------------------------------------------------------------
 
 
 def run_value_ordering(
     formulary: Formulary, space: RegimenSpace, workers: int = 1
 ) -> ValueOrderingResult:
-    """P3: solve Γ of every fully observed record in each DPLL configuration.
+    """P2: solve Γ of every fully observed record in each DPLL configuration.
 
     Parameters
     ----------
@@ -643,7 +347,7 @@ def run_value_ordering(
 def _ordering_for_conditions(
     formulary: Formulary, space: RegimenSpace, conditions: frozenset[str]
 ) -> tuple[ValueOrderingInstance, ...]:
-    """P3 for every set of present risk factors of one condition set (one worker task)."""
+    """P2 for every set of present risk factors of one condition set (one worker task)."""
     solvers = [
         DPLLSolver(decision_first_value=first, reverse_symbol_order=reverse)
         for _, first, reverse in CONFIGURATIONS
