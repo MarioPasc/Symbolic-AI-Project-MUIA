@@ -5,8 +5,8 @@ inherits, consistency (with the mutation test) and the cost of the fixed point. 
 deterministic and returns frozen dataclasses; ``main.py`` loads the data, calls them and writes
 ``results.json``. Given HermiT's runs, each answer is also compared with the oracle on the OWL
 export (:mod:`symbolic_ai.p1_ej2_ontology.owl_oracle`), which shares only the data tables with
-forward chaining. The expected label of every mutation is computed by
-reachability in the told taxonomy (networkx), independently of forward chaining.
+forward chaining. The expected label of every mutation is computed by reachability over the told
+subcategory and definition edges (networkx), independently of forward chaining.
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ from symbolic_ai.dataloader.models import Formulary, OntologyData
 from symbolic_ai.p1_ej2_ontology import owl_oracle
 from symbolic_ai.p1_ej2_ontology.forward_chaining import DISTINCT, fc_closure
 from symbolic_ai.p1_ej2_ontology.ontology import (
-    FAMILIES_CATEGORY,
     SUBSET,
     Ontology,
     identifier,
@@ -42,6 +41,7 @@ from symbolic_ai.p1_ej2_ontology.reasoner import (
     contraindication_sources,
     coprescription_sources,
     derive_formulary,
+    drug_members,
     family_pairs,
     family_sources,
     inherited_by_new_member,
@@ -114,7 +114,12 @@ class TableComparison:
 
 @dataclass(frozen=True, slots=True)
 class DerivedRow:
-    """P3: one derived row with the told statements it comes from."""
+    """P3: one derived row with the told statements it comes from.
+
+    ``also_family_pair`` is set on interaction rows only: whether the two drugs also share an
+    exclusive class in the reference formulary (EJ1's A6). EJ1 encodes A3 and A6 with the same
+    clause ``~T_a | ~T_b``, so such a pair adds no new constraint to EJ1.
+    """
 
     table: str
     key: _Key
@@ -122,11 +127,16 @@ class DerivedRow:
     sources: tuple[str, ...]
     level: str
     oracle_agrees: bool | None
+    also_family_pair: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class FormularyDerivationResult:
-    """P3: the derived formulary compared with the hand-written one, table by table."""
+    """P3: the derived formulary compared with the hand-written one, table by table.
+
+    ``defined_category_members`` lists, for each category defined by conjuncts, the drugs Cl(KB)
+    classifies into it (none is told there).
+    """
 
     derived_version: str
     reference_version: str
@@ -134,14 +144,20 @@ class FormularyDerivationResult:
     rows: tuple[DerivedRow, ...]
     oracle_memberships: OracleAgreement | None
     oracle_rows: OracleAgreement | None
+    defined_category_members: Mapping[str, tuple[str, ...]]
 
 
 @dataclass(frozen=True, slots=True)
 class TaxonomyResult:
-    """P4.1: subsumption among the 41 named categories (proper pairs, reflexive ones excluded)."""
+    """P4.1: subsumption among the named categories (proper pairs, reflexive ones excluded).
+
+    The defined categories are the 12 of ``README.md`` §4.5 and the ones defined by conjuncts
+    (``defined_by_conjuncts``); every other drug category is primitive.
+    """
 
     n_primitive: int
     n_defined: int
+    defined_by_conjuncts: tuple[str, ...]
     told_pairs: int
     primitive_pairs: int
     primitive_to_defined: int
@@ -209,7 +225,13 @@ class MutationRow:
 
 @dataclass(frozen=True, slots=True)
 class ConsistencyResult:
-    """P4.3: consistency of the KB, of each named category, partitions and mutations."""
+    """P4.3: consistency of the KB, of each named category, partitions and mutations.
+
+    ``n_clash_expected_from_upper`` counts the expected clashes due to a disjoint set named
+    ``upper``; it is kept for the schema and is 0 since the upper ontology was removed (R3a).
+    ``n_clash_expected_by_set`` counts the expected clashes by disjoint set (a mutation may be
+    counted under several sets).
+    """
 
     kb_clashes: tuple[str, ...]
     oracle_kb_consistent: bool | None
@@ -220,6 +242,7 @@ class ConsistencyResult:
     n_mutations: int
     n_clash_expected: int
     n_clash_expected_from_upper: int
+    n_clash_expected_by_set: Mapping[str, int]
     n_clash_detected: int
     n_no_clash_expected: int
     n_false_alarms: int
@@ -272,16 +295,23 @@ def _level(sources: Sequence[Source]) -> str:
     return levels[0] if len(levels) == 1 else "+".join(levels)
 
 
-def _taxonomy_graph(data: OntologyData) -> nx.DiGraph[str]:
-    """Return the told taxonomy, child -> parent (networkx; independent of forward chaining)."""
+def _subcategory_graph(data: OntologyData) -> nx.DiGraph[str]:
+    """Return the told subcategory links, child -> parent (networkx; independent of FC)."""
     graph: nx.DiGraph[str] = nx.DiGraph()
     graph.add_nodes_from(c.category_id for c in data.categories)
     graph.add_edges_from((e.category_id, e.parent_id) for e in data.subcategories)
     return graph
 
 
+def _reachability_graph(data: OntologyData) -> nx.DiGraph[str]:
+    """Return the subcategory links plus one parent edge D -> k per conjunct k of a definition."""
+    graph = _subcategory_graph(data)
+    graph.add_edges_from((d.category_id, k) for d in data.definitions for k in d.conjunct_ids)
+    return graph
+
+
 def _up(graph: nx.DiGraph[str], category_id: str) -> set[str]:
-    """Return the category and every category above it in the told taxonomy."""
+    """Return the category and every category above it in ``graph``."""
     return {category_id} | set(nx.descendants(graph, category_id))
 
 
@@ -397,10 +427,12 @@ def run_formulary_derivation(
     Returns
     -------
     FormularyDerivationResult
-        Per-table counts, every derived row with its provenance, and HermiT's agreement.
+        Per-table counts, every derived row with its provenance (an interaction row also says
+        whether its pair is an A6 family pair of ``reference``), and HermiT's agreement.
     """
     derived = derive_formulary(reasoned)
     derived_keys, reference_keys = _formulary_keys(derived), _formulary_keys(reference)
+    reference_family_pairs = reference_keys["families"]
     statements = _statement_counts(reasoned)
     oracle_keys = _oracle_formulary_keys(oracle_run, reasoned.ontology.data) if oracle_run else None
     tables, rows = [], []
@@ -431,6 +463,9 @@ def run_formulary_derivation(
                     sources=tuple(s.subject_id for s in sources),
                     level=_level(sources),
                     oracle_agrees=None if oracle_keys is None else key in oracle_keys[table],
+                    also_family_pair=(
+                        key in reference_family_pairs if table == "interactions" else None
+                    ),
                 )
             )
     oracle_memberships = oracle_rows = None
@@ -457,6 +492,9 @@ def run_formulary_derivation(
         rows=tuple(rows),
         oracle_memberships=oracle_memberships,
         oracle_rows=oracle_rows,
+        defined_category_members={
+            c: drug_members(reasoned.closure, c) for c in reasoned.ontology.conjunctive_ids
+        },
     )
 
 
@@ -492,11 +530,13 @@ def run_taxonomy(
     Returns
     -------
     TaxonomyResult
-        Pair counts by kind, the pairs, and HermiT's agreement on all 41 x 41 cells.
+        Pair counts by kind, the pairs, and HermiT's agreement on every cell of the named x named
+        matrix. A category defined by conjuncts counts as defined, not primitive.
     """
     ontology = reasoned.ontology
     result = taxonomy(reasoned)
-    primitive, defined = set(ontology.drug_categories), set(ontology.defined_ids)
+    primitive = set(ontology.primitive_categories)
+    defined = set(ontology.defined_ids) | set(ontology.conjunctive_ids)
     pairs = result.pairs()
 
     def count(sub: set[str], sup: set[str]) -> int:
@@ -519,6 +559,7 @@ def run_taxonomy(
     return TaxonomyResult(
         n_primitive=len(primitive),
         n_defined=len(defined),
+        defined_by_conjuncts=ontology.conjunctive_ids,
         told_pairs=len(result.told),
         primitive_pairs=count(primitive, primitive),
         primitive_to_defined=count(primitive, defined),
@@ -616,11 +657,13 @@ def _oracle_inheritance_keys(reasoned: ReasonedOntology, run: owl_oracle.OracleR
 
 
 def mutation_candidates(reasoned: ReasonedOntology) -> tuple[tuple[str, str], ...]:
-    """Return every mutation (d, K): a drug and a told category it does not belong to.
+    """Return every mutation (d, K): a drug and a drug category it does not belong to in Cl(KB).
 
-    The category of categories ``therapeutic_families`` is left out: its members are categories.
+    The categories d belongs to include those it is classified into by a definition (tramadol in
+    ``serotonergic_opioids``). The category of categories ``therapeutic_families`` is not a drug
+    category: its members are categories.
     """
-    categories = [c for c in reasoned.ontology.category_ids if c != FAMILIES_CATEGORY]
+    categories = reasoned.ontology.drug_categories
     mutations = []
     for drug_id in reasoned.ontology.drug_ids:
         member_of = set(classify(reasoned, drug_id))
@@ -629,20 +672,27 @@ def mutation_candidates(reasoned: ReasonedOntology) -> tuple[tuple[str, str], ..
 
 
 def expected_clash_sets(data: OntologyData, drug_id: str, category_id: str) -> tuple[str, ...]:
-    """Return the disjoint sets that make d ∈ K a clash, by reachability in the told taxonomy.
+    """Return the disjoint sets that make d ∈ K a clash, by reachability in the taxonomy.
 
-    A clash is expected iff some disjoint set holds K₁ ≠ K₂ with K₁ at or above d's leaf and K₂
-    at or above K. Computed with networkx, independently of forward chaining.
+    A clash is expected iff some disjoint set holds K₁ ≠ K₂ with K₁ at or above one of d's told
+    categories and K₂ at or above K. "Above" follows subcategory edges and, for a category
+    defined by conjuncts, an edge to each conjunct. Computed with networkx, independently of
+    forward chaining. The label ignores classification *into* a defined category, which is exact
+    as long as no defined category is itself in a disjoint set (true in the data: its ancestors
+    are then exactly those of its conjuncts).
     """
-    graph = _taxonomy_graph(data)
-    leaf = next(m.category_id for m in data.memberships if m.object_id == drug_id)
-    above_leaf, above_k = _up(graph, leaf), _up(graph, category_id)
+    graph = _reachability_graph(data)
+    above_told: set[str] = set()
+    for membership in data.memberships:
+        if membership.object_id == drug_id:
+            above_told |= _up(graph, membership.category_id)
+    above_k = _up(graph, category_id)
     return tuple(
         disjoint_set.set_id
         for disjoint_set in data.disjoint_sets
         if any(
             a != b
-            for a in above_leaf.intersection(disjoint_set.category_ids)
+            for a in above_told.intersection(disjoint_set.category_ids)
             for b in above_k.intersection(disjoint_set.category_ids)
         )
     )
@@ -670,8 +720,8 @@ def run_consistency(
         The ontology and its fixed point.
     oracle_run : owl_oracle.OracleRun | None
         HermiT's base run, or ``None`` to skip the oracle. With it, HermiT also checks the
-        mutations in one run (one class leaf(d) ⊓ K each) and in real per-mutation runs on an
-        evenly spread sample of each kind.
+        mutations in one run (one class told(d) ⊓ K each, told(d) the intersection of d's told
+        categories) and in real per-mutation runs on an evenly spread sample of each kind.
 
     Returns
     -------
@@ -720,6 +770,7 @@ def run_consistency(
     )
     positive_rows = [r for r in rows if r.expected_clash]
     negative_rows = [r for r in rows if not r.expected_clash]
+    by_set = Counter(set_id for r in positive_rows for set_id in r.expected_by)
     return ConsistencyResult(
         kb_clashes=_clash_texts(clashes(reasoned.closure)),
         oracle_kb_consistent=oracle_kb,
@@ -733,6 +784,7 @@ def run_consistency(
         n_mutations=len(rows),
         n_clash_expected=len(positive_rows),
         n_clash_expected_from_upper=sum("upper" in r.expected_by for r in positive_rows),
+        n_clash_expected_by_set={s.set_id: by_set[s.set_id] for s in data.disjoint_sets},
         n_clash_detected=sum(bool(r.detected) for r in positive_rows),
         n_no_clash_expected=len(negative_rows),
         n_false_alarms=sum(bool(r.detected) for r in negative_rows),
@@ -751,7 +803,8 @@ def run_fixed_point_cost(reasoned: ReasonedOntology) -> FixedPointResult:
     p is the number of predicates of the KB (the built-in ``Distinct`` excluded), k their maximum
     arity and n the number of constants of the KB (facts and rules). The naive loop (Fig. 9.3) is
     run once more to check that it adds the same facts at every iteration, and the ⊂ facts of
-    Cl(KB) are compared with the transitive closure of the told taxonomy computed by networkx.
+    Cl(KB) are compared with the transitive closure of the told subcategory links computed by
+    networkx (a definition yields memberships through O7, never ``Subset`` facts).
     """
     closure, kb = reasoned.closure, reasoned.kb
     atoms = [*closure.facts, *(a for rule in kb.rules for a in _rule_atoms(rule))]
@@ -759,7 +812,7 @@ def run_fixed_point_cost(reasoned: ReasonedOntology) -> FixedPointResult:
     constants = {arg for a in atoms for arg in a.args if not is_variable(arg)}
     max_arity = max(arity for _, arity in predicates)
     naive = fc_closure(kb, incremental=False)
-    graph = _taxonomy_graph(reasoned.ontology.data)
+    graph = _subcategory_graph(reasoned.ontology.data)
     networkx_pairs = {(c, p) for c in graph.nodes for p in nx.descendants(graph, c)}
     fc_pairs = {
         (identifier(f.args[0]), identifier(f.args[1])) for f in closure.with_predicate(SUBSET)
@@ -800,13 +853,13 @@ def told_knowledge(ontology: Ontology) -> dict[str, object]:
     Returns
     -------
     dict[str, object]
-        Categories (with parents, family and drug-category flags), drugs with their leaf,
-        conditions, risk factors, every link table, the disjoint sets, the defined categories and
-        the text of every clause with its axiom tag.
+        Categories (with told parents, family and drug-category flags), drugs with their told
+        categories, conditions, risk factors, every link table (a self-link has
+        ``subject_a == subject_b``), the disjoint sets, the definitions by conjuncts, the defined
+        categories of §4.5 and the text of every clause with its axiom tag.
     """
     data = ontology.data
     parents = ontology.parents()
-    leaf = {m.object_id: m.category_id for m in data.memberships}
     families = set(data.families)
     return {
         "categories": [
@@ -822,7 +875,12 @@ def told_knowledge(ontology: Ontology) -> dict[str, object]:
             for c in data.categories
         ],
         "drugs": [
-            {"id": d.drug_id, "name_es": d.name_es, "leaf": leaf[d.drug_id]} for d in data.drugs
+            {
+                "id": d.drug_id,
+                "name_es": d.name_es,
+                "categories": list(ontology.told_categories_of(d.drug_id)),
+            }
+            for d in data.drugs
         ],
         "conditions": [{"id": c.condition_id, "name_es": c.name_es} for c in data.conditions],
         "risk_factors": [{"id": r.risk_factor_id, "name_es": r.name_es} for r in data.risk_factors],
@@ -854,6 +912,9 @@ def told_knowledge(ontology: Ontology) -> dict[str, object]:
         "disjoint_sets": [
             {"set_id": s.set_id, "categories": list(s.category_ids), "partition_of": s.partition_of}
             for s in data.disjoint_sets
+        ],
+        "definitions": [
+            {"category": d.category_id, "conjuncts": list(d.conjunct_ids)} for d in data.definitions
         ],
         "defined_categories": [
             {"id": d.category_id, "kind": d.kind.value, "target": d.target_id}

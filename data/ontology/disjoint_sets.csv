@@ -16,6 +16,3 @@ ccb,dihydropyridines,calcium_channel_blockers,1.1.0
 ccb,non_dihydropyridines,calcium_channel_blockers,1.1.0
 raas,ace_inhibitors,raas_blockers,1.1.0
 raas,arbs,raas_blockers,1.1.0
-upper,conditions,clinical_objects,1.1.0
-upper,drugs,clinical_objects,1.1.0
-upper,risk_factors,clinical_objects,1.1.0

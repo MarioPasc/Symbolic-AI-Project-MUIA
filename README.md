@@ -55,8 +55,10 @@ Methodology) and in the team's design notes, which are kept outside this reposit
 ## Run — EJ2, the ontology of drug categories
 
 EJ2 writes the formulary's knowledge once per drug *category* (`data/ontology/`, data 1.1.0: a
-taxonomy of 29 drug categories, one leaf category per drug, and links written on categories),
-translates it into first-order definite clauses (axioms O1-O7), and computes their fixed point by
+taxonomy of 32 drug categories with multiple inheritance, one category defined by its conjuncts,
+the told categories of each drug, and links written on categories, the interactions being
+self-links on three adverse-effect categories), translates it into first-order definite clauses
+(axioms O1-O7, with both directions of every definition), and computes their fixed point by
 forward chaining (AIMA Fig. 9.3 with the incremental rule of §9.3.3, over aima-python's `Expr` and
 unification). Classification, subsumption (by a prototype of each category) and consistency are
 queries on that fixed point, and the drug-level formulary of EJ1 is read off it and compared with
@@ -66,8 +68,8 @@ export of the same tables reasoned by HermiT through owlready2.
 ```bash
 conda activate symai
 
-python -m symbolic_ai.p1_ej2_ontology.main --classify ibuprofen      # categories of one drug
-python -m symbolic_ai.p1_ej2_ontology.main --taxonomy                # subsumers of the 41 named categories
+python -m symbolic_ai.p1_ej2_ontology.main --classify tramadol       # categories of one drug
+python -m symbolic_ai.p1_ej2_ontology.main --taxonomy                # subsumers of the 44 named categories
 python -m symbolic_ai.p1_ej2_ontology.main --formulary               # derived formulary vs 1.0.0
 python -m symbolic_ai.p1_ej2_ontology.main --experiments             # P3, P4 and both figures (~20 s)
 python -m symbolic_ai.p1_ej2_ontology.main --experiments --no-oracle # without HermiT (no Java needed)

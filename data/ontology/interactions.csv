@@ -1,6 +1,4 @@
 subject_a,subject_b,effect,severity,since
-anticoagulants,nsaids,bleeding,major,1.1.0
-anticoagulants,ssris,bleeding,major,1.1.0
-beta_blockers,non_dihydropyridines,"bradycardia, AV block",major,1.1.0
-nsaids,ssris,gastrointestinal bleeding,major,1.1.0
-serotonergic_opioids,ssris,serotonin syndrome,major,1.1.0
+bleeding_risk_drugs,bleeding_risk_drugs,bleeding,major,1.1.0
+bradycardic_drugs,bradycardic_drugs,"bradycardia, AV block",major,1.1.0
+serotonergic_drugs,serotonergic_drugs,serotonin syndrome,major,1.1.0

@@ -261,6 +261,23 @@
       }
     },
     {
+      "name": "ontology_definitions",
+      "path": "ontology/definitions.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "category_id", "type": "string", "constraints": { "required": true } },
+          { "name": "conjunct_id", "type": "string", "constraints": { "required": true } },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["category_id", "conjunct_id"],
+        "foreignKeys": [
+          { "fields": "category_id", "reference": { "resource": "ontology_categories", "fields": "category_id" } },
+          { "fields": "conjunct_id", "reference": { "resource": "ontology_categories", "fields": "category_id" } }
+        ]
+      }
+    },
+    {
       "name": "ontology_memberships",
       "path": "ontology/memberships.csv",
       "profile": "tabular-data-resource",

@@ -5,7 +5,7 @@ direct_oral_anticoagulants,PREG,no safety data in pregnancy,1.1.0
 nonselective_beta_blockers,ASTHMA,bronchospasm,1.1.0
 nsaids,CKD,nephrotoxicity,1.1.0
 raas_blockers,PREG,fetotoxicity,1.1.0
+serotonergic_opioids,EPI,lowers the seizure threshold,1.1.0
 sulfonylureas,CKD,hypoglycaemia,1.1.0
 thiazides,CKD,ineffective at low eGFR,1.1.0
-tramadol,EPI,lowers the seizure threshold,1.1.0
 vitamin_k_antagonists,PREG,teratogenicity,1.1.0

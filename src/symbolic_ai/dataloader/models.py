@@ -219,8 +219,19 @@ class SubcategoryEdge:
 
 
 @dataclass(frozen=True, slots=True)
+class CategoryDefinition:
+    """A category defined by necessary and sufficient conditions (``ontology/definitions.csv``).
+
+    x ∈ ``category_id`` ⇔ x ∈ c for every c in ``conjunct_ids`` (sorted).
+    """
+
+    category_id: str
+    conjunct_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class Membership:
-    """A told membership of a drug in its leaf category: ``object_id`` ∈ ``category_id``."""
+    """A told membership of a drug in a category: ``object_id`` ∈ ``category_id``."""
 
     object_id: str
     category_id: str
@@ -247,7 +258,9 @@ class ContraindicationLink:
 class InteractionLink:
     """Every member of ``subject_a`` interacts adversely with every member of ``subject_b``.
 
-    ``subject_a < subject_b``; each subject is a category or a drug.
+    ``subject_a <= subject_b``; each subject is a category or a drug. A self-link
+    (``subject_a == subject_b``, a category) says that any two different members of that category
+    interact.
     """
 
     subject_a: str
@@ -285,6 +298,7 @@ class OntologyData:
     ``drugs``, ``conditions`` and ``risk_factors`` are read from their own tables. The drug-level
     formulary tables (candidates, contraindications, adverse interactions, coprescriptions, drug
     classes and their members) are never part of it. Tuples are sorted by their keys.
+    ``definitions`` holds the categories defined by their conjuncts (data 1.1.0, amended).
     """
 
     version: str
@@ -300,3 +314,4 @@ class OntologyData:
     coprescriptions: tuple[CoprescriptionLink, ...]
     families: tuple[str, ...]
     disjoint_sets: tuple[DisjointSet, ...]
+    definitions: tuple[CategoryDefinition, ...] = ()

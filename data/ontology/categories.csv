@@ -9,10 +9,10 @@ antihypertensives,Antihipertensivos,Antihypertensives,,1.1.0
 arbs,ARA-II,Angiotensin II receptor blockers,C09C,1.1.0
 beta_blockers,Betabloqueantes,Beta blockers,C07,1.1.0
 biguanides,Biguanidas,Biguanides,A10BA,1.1.0
+bleeding_risk_drugs,Riesgo hemorrágico,Bleeding-risk drugs,,1.1.0
+bradycardic_drugs,Bradicardizantes,Bradycardic drugs,,1.1.0
 calcium_channel_blockers,Calcioantagonistas,Calcium channel blockers,C08,1.1.0
 cardioselective_beta_blockers,Cardioselectivos,Cardioselective beta blockers,C07AB,1.1.0
-clinical_objects,Objetos clínicos,Clinical objects,,1.1.0
-conditions,Condiciones,Conditions,,1.1.0
 dihydropyridines,Dihidropiridínicos,Dihydropyridines,C08C,1.1.0
 direct_oral_anticoagulants,ACOD,Direct oral anticoagulants,B01AF,1.1.0
 dpp4_inhibitors,iDPP-4,DPP-4 inhibitors,A10BH,1.1.0
@@ -25,7 +25,7 @@ opioids,Opioides,Opioids,N02A,1.1.0
 other_antidepressants,Otros antidepresivos,Other antidepressants,N06AX,1.1.0
 proton_pump_inhibitors,IBP,Proton pump inhibitors,A02BC,1.1.0
 raas_blockers,Bloqueantes del SRAA,RAAS blockers,C09,1.1.0
-risk_factors,Factores de riesgo,Risk factors,,1.1.0
+serotonergic_drugs,Serotoninérgicos,Serotonergic drugs,,1.1.0
 serotonergic_opioids,Opioides serotoninérgicos,Serotonergic opioids,,1.1.0
 ssris,ISRS,SSRIs,N06AB,1.1.0
 sulfonylureas,Sulfonilureas,Sulfonylureas,A10BB,1.1.0

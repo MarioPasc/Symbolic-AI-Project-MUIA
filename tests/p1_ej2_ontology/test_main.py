@@ -16,8 +16,9 @@ pytestmark = pytest.mark.integration
 def test_classify_prints_the_categories(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["--classify", "tramadol", "--no-oracle"]) == 0
     out = capsys.readouterr().out
-    assert "leaf category serotonergic_opioids" in out
-    assert "contraindicated_EPI" in out
+    assert "told categories opioids, serotonergic_drugs" in out
+    assert "defined categories: candidate_PAIN, contraindicated_EPI, serotonergic_opioids" in out
+    assert "a new member of opioids would receive 4 formulary rows" in out
 
 
 def test_classify_unknown_drug_exits_with_an_error(capsys: pytest.CaptureFixture[str]) -> None:
@@ -25,14 +26,16 @@ def test_classify_unknown_drug_exits_with_an_error(capsys: pytest.CaptureFixture
     assert "aspirin" in capsys.readouterr().err
 
 
-def test_taxonomy_prints_108_pairs(capsys: pytest.CaptureFixture[str]) -> None:
+def test_taxonomy_prints_124_pairs(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["--taxonomy"]) == 0
-    assert "108 proper subsumption pairs among 41 categories" in capsys.readouterr().out
+    assert "124 proper subsumption pairs among 44 categories" in capsys.readouterr().out
 
 
-def test_formulary_reports_the_extra_pair(capsys: pytest.CaptureFixture[str]) -> None:
+def test_formulary_reports_the_extra_pairs(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["--formulary"]) == 0
-    assert "only derived: apixaban / sertraline" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    for pair in ("apixaban / sertraline", "apixaban / warfarin", "bisoprolol / propranolol"):
+        assert f"only derived: {pair}" in out
 
 
 def test_plot_rejects_a_file_of_another_schema(tmp_path: Path) -> None:
