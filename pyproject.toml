@@ -67,6 +67,12 @@ module = ["aima", "aima.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
 
+[[tool.mypy.overrides]]
+# Untyped third-party libraries of EJ2 (no stubs in the conda env); wrapped at one place each.
+module = ["networkx", "networkx.*", "owlready2", "owlready2.*", "graphviz", "graphviz.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
 [tool.coverage.run]
 source = ["symbolic_ai"]
 omit = ["src/aima/*"]
