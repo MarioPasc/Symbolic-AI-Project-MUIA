@@ -12,6 +12,9 @@ dependencies:
   - sortedcontainers
   # report figures (symbolic_ai.viz)
   - matplotlib
+  # EJ2 ontology figure: Graphviz's `dot` and its Python binding
+  - graphviz
+  - python-graphviz
   # development
   - pytest
   - pytest-cov
@@ -20,3 +23,5 @@ dependencies:
   - pip
   - pip:
       - -e .
+      # EJ2 oracle: HermiT through owlready2 (needs a Java runtime >= 11 on the system)
+      - owlready2==0.51

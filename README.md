@@ -52,6 +52,40 @@ The problem (axioms A1-A6, the bounds Γ⁺/Γ⁻, the decision rule) and the re
 `aima.logic.dpll` directly, with `T_d` tried false first by default, are in the report (EJ1,
 Methodology) and in the team's design notes, which are kept outside this repository.
 
+## Run — EJ2, the ontology of drug categories
+
+EJ2 writes the formulary's knowledge once per drug *category* (`data/ontology/`, data 1.1.0: a
+taxonomy of 29 drug categories, one leaf category per drug, and links written on categories),
+translates it into first-order definite clauses (axioms O1-O7), and computes their fixed point by
+forward chaining (AIMA Fig. 9.3 with the incremental rule of §9.3.3, over aima-python's `Expr` and
+unification). Classification, subsumption (by a prototype of each category) and consistency are
+queries on that fixed point, and the drug-level formulary of EJ1 is read off it and compared with
+the hand-written formulary 1.0.0. Every answer is checked against an independent oracle: an OWL 2
+export of the same tables reasoned by HermiT through owlready2.
+
+```bash
+conda activate symai
+
+python -m symbolic_ai.p1_ej2_ontology.main --classify ibuprofen      # categories of one drug
+python -m symbolic_ai.p1_ej2_ontology.main --taxonomy                # subsumers of the 41 named categories
+python -m symbolic_ai.p1_ej2_ontology.main --formulary               # derived formulary vs 1.0.0
+python -m symbolic_ai.p1_ej2_ontology.main --experiments             # P3, P4 and both figures (~20 s)
+python -m symbolic_ai.p1_ej2_ontology.main --experiments --no-oracle # without HermiT (no Java needed)
+python -m symbolic_ai.p1_ej2_ontology.main --plot outputs/ej2/results.json   # redraw the figures only
+```
+
+`--experiments` writes `outputs/ej2/results.json` (schema `symai.ej2.results/1`: provenance, the
+told ontology, the fixed point, P3 `formulary_derivation`, P4 `taxonomy`, `inheritance`,
+`consistency`) and `outputs/ej2/fig_ej2_ontology{,_inferred}.{dot,pdf,png}`, the ontology drawn as
+a semantic network by Graphviz from that file. Two runs give byte-identical files (no timestamps;
+the PDFs are rendered with `SOURCE_DATE_EPOCH=0`).
+
+**Optional requirements.** The oracle needs `owlready2` (it bundles HermiT) and a Java runtime
+(≥ 11) on the system; the figures need Graphviz's `dot`. Both come with `environment.yml` (Java
+excepted); with pip, `pip install -e ".[owl]"`. Without Java, run with `--no-oracle`: the
+forward-chaining results are the same, the oracle fields of `results.json` are `null`, and the
+oracle tests are skipped.
+
 ## Test
 
 ```bash
@@ -76,7 +110,7 @@ symnbolic_ai_project/
 │       ├── dataloader/               the only reader of data/
 │       ├── viz/                      shared IEEE figure style for every exercise
 │       ├── p1_ej1_logic/             EJ1: the SAT prescribing agent (this practical's core)
-│       ├── p1_ej2_ontology/          EJ2: placeholder
+│       ├── p1_ej2_ontology/          EJ2: ontology, forward chaining, HermiT oracle, figure
 │       └── p1_ej3_search/            EJ3: placeholder
 └── tests/                            mirrors src/symbolic_ai/
 ```
@@ -94,3 +128,15 @@ reference for this layout and for `p1_ej1_logic`'s file roles.
   (DPLL, value ordering), §7.7 (knowledge-based agents).
 - Figure style (`src/symbolic_ai/viz/style.py`): matplotlib; Paul Tol's *bright* colour-blind-safe palette
   (P. Tol, "Colour schemes", SRON technical note SRON/EPS/TN/09-002).
+- EJ2: aima-python's `Expr`, `expr`, `unify`, `subst`, `variables`, `is_definite_clause`,
+  `parse_definite_clause` (same vendored copy); its `fol_fc_ask` is used only as a test reference.
+  The forward-chaining loop follows Fig. 9.3 and §9.3.2-9.3.3 of *Artificial Intelligence: A
+  Modern Approach*; the ontology follows §10.1-10.2 and §10.5 (4th ed.).
+- **owlready2** 0.51, https://pypi.org/project/owlready2/ (J.-B. Lamy, *Artificial Intelligence in
+  Medicine* 80, 2017), LGPL-3.0-or-later, with the bundled **HermiT** 1.3.8 OWL 2 reasoner
+  (B. Glimm, I. Horrocks, B. Motik, G. Stoilos, Z. Wang, *J. Automated Reasoning* 53(3), 2014),
+  LGPL-3.0-or-later — the EJ2 oracle (optional dependency).
+- **networkx** 3.7, https://networkx.org, BSD-3-Clause — acyclicity, reachability and transitive
+  closure checks of the taxonomy.
+- **Graphviz** 14.1.2, https://graphviz.org, EPL-1.0, through **python-graphviz** 0.21,
+  https://github.com/xflr6/graphviz, MIT — the EJ2 ontology figure.
