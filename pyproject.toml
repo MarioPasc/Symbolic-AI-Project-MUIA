@@ -22,6 +22,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.6", "mypy>=1.10"]
+# EJ2: the HermiT oracle (owlready2 bundles HermiT; needs a Java runtime >= 11) and the ontology
+# figure (the Python binding; Graphviz's `dot` executable comes from conda-forge `graphviz`).
+owl = ["owlready2==0.51", "graphviz>=0.20"]
 
 [project.scripts]
 symai-ej1 = "symbolic_ai.p1_ej1_logic.main:main"
@@ -64,6 +67,12 @@ exclude = ["src/aima/"]
 
 [[tool.mypy.overrides]]
 module = ["aima", "aima.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+# Untyped third-party libraries of EJ2 (no stubs in the conda env); wrapped at one place each.
+module = ["networkx", "networkx.*", "owlready2", "owlready2.*", "graphviz", "graphviz.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
 

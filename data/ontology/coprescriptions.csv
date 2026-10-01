@@ -1,0 +1,2 @@
+subject_id,risk_factor_id,companion_drug_id,reason,since
+nsaids,AGE65,omeprazole,gastroprotection,1.1.0

@@ -2,7 +2,7 @@
   "name": "symbolic-ai-course-database",
   "title": "Symbolic AI course database: formulary and patients",
   "profile": "tabular-data-package",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "resources": [
     {
       "name": "conditions",
@@ -225,6 +225,155 @@
         "foreignKeys": [
           { "fields": "encounter_id", "reference": { "resource": "encounters", "fields": "encounter_id" } },
           { "fields": "risk_factor_id", "reference": { "resource": "risk_factors", "fields": "risk_factor_id" } }
+        ]
+      }
+    },
+    {
+      "name": "ontology_categories",
+      "path": "ontology/categories.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "category_id", "type": "string", "constraints": { "required": true, "pattern": "^[a-z][a-z0-9_]*$" } },
+          { "name": "name_es", "type": "string", "constraints": { "required": true } },
+          { "name": "name_en", "type": "string", "constraints": { "required": true } },
+          { "name": "atc_code", "type": "string" },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["category_id"]
+      }
+    },
+    {
+      "name": "ontology_subcategories",
+      "path": "ontology/subcategories.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "category_id", "type": "string", "constraints": { "required": true } },
+          { "name": "parent_id", "type": "string", "constraints": { "required": true } },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["category_id", "parent_id"],
+        "foreignKeys": [
+          { "fields": "category_id", "reference": { "resource": "ontology_categories", "fields": "category_id" } },
+          { "fields": "parent_id", "reference": { "resource": "ontology_categories", "fields": "category_id" } }
+        ]
+      }
+    },
+    {
+      "name": "ontology_memberships",
+      "path": "ontology/memberships.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "object_id", "type": "string", "constraints": { "required": true } },
+          { "name": "category_id", "type": "string", "constraints": { "required": true } },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["object_id", "category_id"],
+        "foreignKeys": [
+          { "fields": "object_id", "reference": { "resource": "drugs", "fields": "drug_id" } },
+          { "fields": "category_id", "reference": { "resource": "ontology_categories", "fields": "category_id" } }
+        ]
+      }
+    },
+    {
+      "name": "ontology_indications",
+      "path": "ontology/indications.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "subject_id", "type": "string", "constraints": { "required": true } },
+          { "name": "condition_id", "type": "string", "constraints": { "required": true } },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["subject_id", "condition_id"],
+        "foreignKeys": [
+          { "fields": "condition_id", "reference": { "resource": "conditions", "fields": "condition_id" } }
+        ]
+      }
+    },
+    {
+      "name": "ontology_contraindications",
+      "path": "ontology/contraindications.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "subject_id", "type": "string", "constraints": { "required": true } },
+          { "name": "risk_factor_id", "type": "string", "constraints": { "required": true } },
+          { "name": "reason", "type": "string", "constraints": { "required": true } },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["subject_id", "risk_factor_id"],
+        "foreignKeys": [
+          { "fields": "risk_factor_id", "reference": { "resource": "risk_factors", "fields": "risk_factor_id" } }
+        ]
+      }
+    },
+    {
+      "name": "ontology_interactions",
+      "path": "ontology/interactions.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "subject_a", "type": "string", "constraints": { "required": true } },
+          { "name": "subject_b", "type": "string", "constraints": { "required": true } },
+          { "name": "effect", "type": "string", "constraints": { "required": true } },
+          { "name": "severity", "type": "string", "constraints": { "required": true, "enum": ["major", "moderate", "minor"] } },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["subject_a", "subject_b"]
+      }
+    },
+    {
+      "name": "ontology_coprescriptions",
+      "path": "ontology/coprescriptions.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "subject_id", "type": "string", "constraints": { "required": true } },
+          { "name": "risk_factor_id", "type": "string", "constraints": { "required": true } },
+          { "name": "companion_drug_id", "type": "string", "constraints": { "required": true } },
+          { "name": "reason", "type": "string", "constraints": { "required": true } },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["subject_id", "risk_factor_id", "companion_drug_id"],
+        "foreignKeys": [
+          { "fields": "risk_factor_id", "reference": { "resource": "risk_factors", "fields": "risk_factor_id" } },
+          { "fields": "companion_drug_id", "reference": { "resource": "drugs", "fields": "drug_id" } }
+        ]
+      }
+    },
+    {
+      "name": "ontology_families",
+      "path": "ontology/families.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "category_id", "type": "string", "constraints": { "required": true } },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["category_id"],
+        "foreignKeys": [
+          { "fields": "category_id", "reference": { "resource": "ontology_categories", "fields": "category_id" } }
+        ]
+      }
+    },
+    {
+      "name": "ontology_disjoint_sets",
+      "path": "ontology/disjoint_sets.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "set_id", "type": "string", "constraints": { "required": true, "pattern": "^[a-z][a-z0-9_]*$" } },
+          { "name": "category_id", "type": "string", "constraints": { "required": true } },
+          { "name": "partition_of", "type": "string" },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["set_id", "category_id"],
+        "foreignKeys": [
+          { "fields": "category_id", "reference": { "resource": "ontology_categories", "fields": "category_id" } },
+          { "fields": "partition_of", "reference": { "resource": "ontology_categories", "fields": "category_id" } }
         ]
       }
     }

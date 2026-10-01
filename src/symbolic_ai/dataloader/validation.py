@@ -1,5 +1,10 @@
 """Validation of the database against every rule of ``01-database.md`` section 5.
 
+Since data 1.1.0 it also checks the ontology tables (EJ2 results design §6.1): link subjects resolve
+to a category or a drug, the two namespaces are disjoint, the subcategory graph is acyclic,
+``subject_a < subject_b``, at most one told membership per drug, and every disjoint set has at
+least two members and one consistent ``partition_of``.
+
 Every check reads the raw (untyped) rows of every resource and returns the problems it finds
 instead of raising, so that :func:`collect_problems` reports every violation of the database in one
 pass, as the specification requires.
@@ -7,8 +12,10 @@ pass, as the specification requires.
 
 from __future__ import annotations
 
+import graphlib
 import itertools
 from collections import Counter, defaultdict
+from collections.abc import Iterable
 from datetime import date
 from pathlib import Path
 from typing import TypeAlias
@@ -336,6 +343,147 @@ def _check_age65_and_preg_consistency(raw: RawTable) -> list[str]:
     return problems
 
 
+# --- ontology tables (data 1.1.0; results design §6.1) ----------------------------------------
+
+_ONTOLOGY_CATEGORIES = "ontology_categories"
+_ONTOLOGY_SUBCATEGORIES = "ontology_subcategories"
+_ONTOLOGY_MEMBERSHIPS = "ontology_memberships"
+_ONTOLOGY_DISJOINT_SETS = "ontology_disjoint_sets"
+_ONTOLOGY_INTERACTIONS = "ontology_interactions"
+#: Link tables whose subject is a category or a drug: (resource, subject fields).
+_ONTOLOGY_SUBJECT_FIELDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("ontology_indications", ("subject_id",)),
+    ("ontology_contraindications", ("subject_id",)),
+    (_ONTOLOGY_INTERACTIONS, ("subject_a", "subject_b")),
+    ("ontology_coprescriptions", ("subject_id",)),
+)
+
+
+def _ids(raw: RawTable, resource_name: str, field_name: str) -> frozenset[str]:
+    return _field_value_set(_rows(raw, resource_name), field_name)
+
+
+def _check_subject_namespaces_disjoint(raw: RawTable) -> list[str]:
+    """Category and drug identifiers never coincide, so a link subject is unambiguous."""
+    shared = sorted(_ids(raw, _ONTOLOGY_CATEGORIES, "category_id") & _ids(raw, "drugs", "drug_id"))
+    return [f"ontology_categories[category_id={c!r}]: also a drug_id" for c in shared]
+
+
+def _check_link_subjects_resolve(raw: RawTable) -> list[str]:
+    """Every link subject is a category or a drug (a foreign key into either table)."""
+    known = _ids(raw, _ONTOLOGY_CATEGORIES, "category_id") | _ids(raw, "drugs", "drug_id")
+    problems: list[str] = []
+    for resource_name, subject_fields in _ONTOLOGY_SUBJECT_FIELDS:
+        for row in _rows(raw, resource_name):
+            problems.extend(
+                f"{resource_name}: field {name!r} = {value!r} is neither a category nor a drug"
+                for name in subject_fields
+                if (value := row.get(name)) is not None and value not in known
+            )
+    return problems
+
+
+def _check_interaction_subject_order(raw: RawTable) -> list[str]:
+    """``ontology_interactions``: ``subject_a < subject_b`` (no self-pairs)."""
+    problems: list[str] = []
+    for row in _rows(raw, _ONTOLOGY_INTERACTIONS):
+        a, b = row.get("subject_a"), row.get("subject_b")
+        if a is not None and b is not None and not a < b:
+            problems.append(
+                f"ontology_interactions[subject_a={a!r}, subject_b={b!r}]: subject_a must be "
+                "lexicographically before subject_b"
+            )
+    return problems
+
+
+def _check_subcategories_acyclic(raw: RawTable) -> list[str]:
+    """Check that the subcategory graph (child -> parents) has no cycle."""
+    parents: dict[str, set[str]] = defaultdict(set)
+    for row in _rows(raw, _ONTOLOGY_SUBCATEGORIES):
+        child, parent = row.get("category_id"), row.get("parent_id")
+        if child is not None and parent is not None:
+            parents[child].add(parent)
+    try:
+        tuple(graphlib.TopologicalSorter(parents).static_order())
+    except graphlib.CycleError as exc:
+        cycle = " -> ".join(str(node) for node in exc.args[1])
+        return [f"ontology_subcategories: the subcategory graph has a cycle ({cycle})"]
+    return []
+
+
+def _check_at_most_one_membership(raw: RawTable) -> list[str]:
+    """Every drug has at most one told membership (its leaf category)."""
+    counts = Counter(
+        object_id
+        for row in _rows(raw, _ONTOLOGY_MEMBERSHIPS)
+        if (object_id := row.get("object_id")) is not None
+    )
+    return [
+        f"ontology_memberships[object_id={object_id!r}]: {counts[object_id]} told memberships, "
+        "expected exactly one"
+        for object_id in sorted(counts)
+        if counts[object_id] > 1
+    ]
+
+
+def _check_disjoint_sets(raw: RawTable) -> list[str]:
+    """Every disjoint set has at least two members and one consistent ``partition_of``."""
+    members: dict[str, list[str | None]] = defaultdict(list)
+    partition_of: dict[str, set[str | None]] = defaultdict(set)
+    for row in _rows(raw, _ONTOLOGY_DISJOINT_SETS):
+        set_id = row.get("set_id")
+        if set_id is not None:
+            members[set_id].append(row.get("category_id"))
+            partition_of[set_id].add(row.get("partition_of"))
+    problems: list[str] = []
+    for set_id in sorted(members):
+        if len(members[set_id]) < 2:
+            problems.append(f"ontology_disjoint_sets[set_id={set_id!r}]: fewer than two members")
+        if len(partition_of[set_id]) > 1:
+            values = sorted(str(value) for value in partition_of[set_id])
+            problems.append(
+                f"ontology_disjoint_sets[set_id={set_id!r}]: inconsistent partition_of {values}"
+            )
+    return problems
+
+
+def _check_ontology(raw: RawTable) -> list[str]:
+    """Run the structural checks of the ontology tables (results design §6.1)."""
+    problems = _check_subject_namespaces_disjoint(raw)
+    problems.extend(_check_link_subjects_resolve(raw))
+    problems.extend(_check_interaction_subject_order(raw))
+    problems.extend(_check_subcategories_acyclic(raw))
+    problems.extend(_check_at_most_one_membership(raw))
+    problems.extend(_check_disjoint_sets(raw))
+    return problems
+
+
+def missing_memberships(drug_ids: Iterable[str], member_ids: Iterable[str]) -> tuple[str, ...]:
+    """Report every drug without a told membership, for :func:`load_ontology`.
+
+    This half of "every drug has exactly one told membership" is checked when the ontology is
+    loaded, not in :func:`collect_problems`: a drug may be added to the formulary in a later data
+    version before it is placed in the ontology, and that must not invalidate the database for EJ1.
+
+    Parameters
+    ----------
+    drug_ids : Iterable[str]
+        The drugs the ontology must classify.
+    member_ids : Iterable[str]
+        The objects of the told memberships.
+
+    Returns
+    -------
+    tuple[str, ...]
+        One problem message per drug with no told membership, sorted by drug.
+    """
+    missing = sorted(set(drug_ids) - set(member_ids))
+    return tuple(
+        f"ontology_memberships: drug {drug_id!r} has no told membership, expected exactly one"
+        for drug_id in missing
+    )
+
+
 def _read_all_raw(data_dir: Path, package: DataPackage) -> RawTable:
     return {resource.name: read_raw_rows(data_dir, resource) for resource in package.resources}
 
@@ -375,4 +523,5 @@ def collect_problems(data_dir: Path) -> tuple[str, ...]:
     problems.extend(_check_encounter_sequence(raw))
     problems.extend(_check_encounter_risk_factor_completeness(raw))
     problems.extend(_check_age65_and_preg_consistency(raw))
+    problems.extend(_check_ontology(raw))
     return tuple(problems)

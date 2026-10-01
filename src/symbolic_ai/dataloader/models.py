@@ -195,3 +195,108 @@ class Encounter:
             Risk factor identifiers.
         """
         return frozenset(r for r, s in self.risk_factors.items() if s is status)
+
+
+# --- ontology tables (data 1.1.0, EJ2) --------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Category:
+    """A category of the ontology (``ontology/categories.csv``)."""
+
+    category_id: str
+    name_es: str
+    name_en: str
+    atc_code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SubcategoryEdge:
+    """A told subcategory link: ``category_id`` ⊂ ``parent_id``."""
+
+    category_id: str
+    parent_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class Membership:
+    """A told membership of a drug in its leaf category: ``object_id`` ∈ ``category_id``."""
+
+    object_id: str
+    category_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class IndicationLink:
+    """Every member of ``subject_id`` (a category or a drug) is a candidate for ``condition_id``."""
+
+    subject_id: str
+    condition_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class ContraindicationLink:
+    """Every member of ``subject_id`` (a category or a drug) is contraindicated by a risk factor."""
+
+    subject_id: str
+    risk_factor_id: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class InteractionLink:
+    """Every member of ``subject_a`` interacts adversely with every member of ``subject_b``.
+
+    ``subject_a < subject_b``; each subject is a category or a drug.
+    """
+
+    subject_a: str
+    subject_b: str
+    effect: str
+    severity: str
+
+
+@dataclass(frozen=True, slots=True)
+class CoprescriptionLink:
+    """Members of ``subject_id`` with ``risk_factor_id`` require ``companion_drug_id``."""
+
+    subject_id: str
+    risk_factor_id: str
+    companion_drug_id: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class DisjointSet:
+    """A set of pairwise disjoint categories; a partition of ``partition_of`` when it is set.
+
+    ``category_ids`` is sorted.
+    """
+
+    set_id: str
+    category_ids: tuple[str, ...]
+    partition_of: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OntologyData:
+    """The raw tables of the ontology (data 1.1.0), with the formulary's identifiers and names.
+
+    ``drugs``, ``conditions`` and ``risk_factors`` are read from their own tables. The drug-level
+    formulary tables (candidates, contraindications, adverse interactions, coprescriptions, drug
+    classes and their members) are never part of it. Tuples are sorted by their keys.
+    """
+
+    version: str
+    drugs: tuple[Drug, ...]
+    conditions: tuple[Condition, ...]
+    risk_factors: tuple[RiskFactor, ...]
+    categories: tuple[Category, ...]
+    subcategories: tuple[SubcategoryEdge, ...]
+    memberships: tuple[Membership, ...]
+    indications: tuple[IndicationLink, ...]
+    contraindications: tuple[ContraindicationLink, ...]
+    interactions: tuple[InteractionLink, ...]
+    coprescriptions: tuple[CoprescriptionLink, ...]
+    families: tuple[str, ...]
+    disjoint_sets: tuple[DisjointSet, ...]
