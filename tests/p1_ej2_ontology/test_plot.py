@@ -67,13 +67,11 @@ def test_source_is_identical_across_two_builds(results: Mapping[str, object]) ->
 
 
 @requires_dot
-def test_inferred_variant_adds_inherited_rows_and_drops_the_upper_ontology(
-    results: Mapping[str, object],
-) -> None:
+def test_inferred_variant_adds_inherited_rows(results: Mapping[str, object]) -> None:
     told = build_ontology_graph(results, inferred=False).source
     inferred = build_ontology_graph(results, inferred=True).source
     assert "trata FA; CI: EMB" in inferred and "trata FA; CI: EMB" not in told
-    assert "\tclinical_objects [" in told and "\tclinical_objects [" not in inferred
+    assert "clinical_objects" not in told and "clinical_objects" not in inferred
 
 
 @requires_dot

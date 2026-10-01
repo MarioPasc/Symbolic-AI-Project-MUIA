@@ -14,6 +14,7 @@ omeprazole,proton_pump_inhibitors,1.1.0
 paracetamol,anilides,1.1.0
 propranolol,nonselective_beta_blockers,1.1.0
 sertraline,ssris,1.1.0
-tramadol,serotonergic_opioids,1.1.0
+tramadol,opioids,1.1.0
+tramadol,serotonergic_drugs,1.1.0
 verapamil,non_dihydropyridines,1.1.0
 warfarin,vitamin_k_antagonists,1.1.0

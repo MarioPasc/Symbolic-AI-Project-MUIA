@@ -273,8 +273,8 @@ def _add_edges(graph: graphviz.Digraph, knowledge: _Knowledge, hidden: frozenset
             # category while the parent stays on the left (rankdir=LR).
             graph.edge(parent, category_id, dir="back")
     for drug_id in sorted(knowledge.drugs):
-        leaf = _text(knowledge.drugs[drug_id], "leaf")
-        graph.edge(leaf, drug_id, dir="back", style="dashed")
+        for category_id in _texts(knowledge.drugs[drug_id], "categories"):
+            graph.edge(category_id, drug_id, dir="back", style="dashed")
 
 
 def build_ontology_graph(results: Mapping[str, object], *, inferred: bool) -> graphviz.Digraph:

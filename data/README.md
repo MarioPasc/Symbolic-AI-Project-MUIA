@@ -23,12 +23,14 @@ data/
 └── patients/                   the cases
 ```
 
-`ontology/` holds the categories (`categories.csv`), their subcategory links (`subcategories.csv`),
-the leaf category of each drug (`memberships.csv`), the links written once per category or drug
-(`indications.csv`, `contraindications.csv`, `interactions.csv`, `coprescriptions.csv`), the
-therapeutic families (`families.csv`) and the disjoint sets and partitions (`disjoint_sets.csv`).
-EJ2 derives the drug-level formulary from these tables; it never reads the drug-level tables of
-`formulary/` except to compare with them.
+`ontology/` holds the categories (`categories.csv`), their subcategory links (`subcategories.csv`;
+a category may have several parents), the categories defined by the conjunction of others
+(`definitions.csv`), the told categories of each drug (`memberships.csv`; at least one per drug),
+the links written once per category (`indications.csv`, `contraindications.csv`,
+`interactions.csv`, where a self-link `subject_a = subject_b` relates any two members of one
+category, `coprescriptions.csv`), the therapeutic families (`families.csv`) and the disjoint sets
+and partitions (`disjoint_sets.csv`). EJ2 derives the drug-level formulary from these tables; it
+never reads the drug-level tables of `formulary/` except to compare with them.
 
 See `../docs` (private TFM repository, not in this code repository) for the full schema
 specification, `SPECIFICATIONS/01-database.md`.

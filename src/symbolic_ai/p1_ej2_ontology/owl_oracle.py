@@ -2,15 +2,19 @@
 
 The oracle shares only the dataloader's :class:`~symbolic_ai.dataloader.models.OntologyData` with
 the forward-chaining reasoner: no clause, no aima ``Expr`` and no forward-chaining code. Mapping
-(``README.md`` §5.4): a category is a class; c ⊂ c' is ``SubClassOf``; a told membership is a class
-assertion; a member-property link written on a category is ``SubClassOf(c, ObjectHasValue(p, v))``
-(CLASSIC's *Fills*) and one written on a drug is a property assertion; a defined category is
-``EquivalentClasses(D, drugs ⊓ ∃p.{v})``; a disjoint set is ``DisjointClasses``; every individual is
-in one ``DifferentIndividuals`` axiom (unique names); a category-pair interaction is the DL-safe
-SWRL rule ``c(?a), c'(?b), DifferentFrom(?a, ?b) -> interacts(?a, ?b)``, one per direction. The
-ternary coprescription link ``CopCat(c, r, d')`` becomes one property ``requires_<r>`` per risk
-factor with value d'. Families are not exported: a category of categories needs OWL punning, and
-the family pairs follow from class memberships.
+(``README.md`` §5.4, results design §11.2): a category is a class; c ⊂ c' is ``SubClassOf``; a
+told membership is a class assertion (a drug may have several); a member-property link written on
+a category is ``SubClassOf(c, ObjectHasValue(p, v))`` (CLASSIC's *Fills*) and one written on a drug
+is a property assertion; a defined category of §4.5 is ``EquivalentClasses(D, drugs ⊓ ∃p.{v})``
+and a category defined by conjuncts is ``EquivalentClasses(D, k₁ ⊓ … ⊓ kₙ)``; a disjoint set is
+``DisjointClasses``; every individual is in one ``DifferentIndividuals`` axiom (unique names); a
+category-pair interaction is the DL-safe SWRL rule
+``c(?a), c'(?b), DifferentFrom(?a, ?b) -> interacts(?a, ?b)``, one per direction, and a self-link
+on c is the single rule ``c(?a), c(?b), DifferentFrom(?a, ?b) -> interacts(?a, ?b)``. Conditions
+and risk factors are plain individuals (no upper ontology). The ternary coprescription link
+``CopCat(c, r, d')`` becomes one property ``requires_<r>`` per risk factor with value d'. Families
+are not exported: a category of categories needs OWL punning, and the family pairs follow from
+class memberships.
 
 HermiT (Glimm et al., J. Autom. Reasoning 53(3), 2014) is sound and complete for OWL 2 DL, so a
 mistake in the translation to clauses, in the forward-chaining loop or in the queries shows up as a
@@ -48,8 +52,6 @@ logger = logging.getLogger(__name__)
 _ONTOLOGY_IRI = "http://symai.local/ej2-ontology.owl#"
 # Data identifiers the mapping refers to (kept here, not imported, so the oracle stays independent).
 _DRUGS = "drugs"
-_CONDITIONS = "conditions"
-_RISK_FACTORS = "risk_factors"
 _TREATS = "treats"
 _CONTRAINDICATED_BY = "contraindicated_by"
 _INTERACTS = "interacts"
@@ -164,6 +166,14 @@ def _parents(data: OntologyData) -> dict[str, list[str]]:
     return {child: sorted(parents[child]) for child in sorted(parents)}
 
 
+def _told_types(data: OntologyData) -> dict[str, list[str]]:
+    """Return the told categories of every drug that has one, sorted."""
+    told: dict[str, list[str]] = {}
+    for membership in data.memberships:
+        told.setdefault(membership.object_id, []).append(membership.category_id)
+    return {drug_id: sorted(told[drug_id]) for drug_id in sorted(told)}
+
+
 class _Export:
     """Builds the OWL ontology of :class:`OntologyData` in a fresh owlready2 world."""
 
@@ -177,6 +187,7 @@ class _Export:
         self.properties: dict[str, Any] = {}
         with self.onto:
             self._declare_classes()
+            self._declare_definitions()
             self._declare_properties()
             self._declare_individuals()
             self._declare_links()
@@ -190,24 +201,33 @@ class _Export:
             bases = tuple(self.classes[p] for p in parents[category_id]) or (self.owl.Thing,)
             self.classes[category_id] = _new_class(_CLASS + category_id, bases)
 
+    def _declare_definitions(self) -> None:
+        """State D ≡ k₁ ⊓ … ⊓ kₙ for every category defined by conjuncts."""
+        for definition in self.data.definitions:
+            conjuncts = [self.classes[k] for k in definition.conjunct_ids]
+            self.classes[definition.category_id].equivalent_to.append(self.owl.And(conjuncts))
+
     def _declare_properties(self) -> None:
         names = [_TREATS, _CONTRAINDICATED_BY, _INTERACTS]
         names += [_REQUIRES + r.risk_factor_id for r in self.data.risk_factors]
         for name in names:
             self.properties[name] = _new_class(name, (self.owl.ObjectProperty,))
 
-    def _new_individual(self, name: str, category_id: str | None) -> None:
-        cls = self.classes.get(category_id, self.owl.Thing) if category_id else self.owl.Thing
-        self.individuals[name] = cls(name)
+    def _new_individual(self, name: str, category_ids: Sequence[str]) -> None:
+        """Create an individual asserted in every class of ``category_ids`` (``Thing`` if none)."""
+        classes = [self.classes[c] for c in category_ids]
+        individual = (classes[0] if classes else self.owl.Thing)(name)
+        individual.is_a.extend(classes[1:])
+        self.individuals[name] = individual
 
     def _declare_individuals(self) -> None:
-        leaf = {m.object_id: m.category_id for m in self.data.memberships}
+        told = _told_types(self.data)
         for drug in self.data.drugs:
-            self._new_individual(_DRUG + drug.drug_id, leaf.get(drug.drug_id))
+            self._new_individual(_DRUG + drug.drug_id, told.get(drug.drug_id, []))
         for condition in self.data.conditions:
-            self._new_individual(_CONDITION + condition.condition_id, _CONDITIONS)
+            self._new_individual(_CONDITION + condition.condition_id, [])
         for risk_factor in self.data.risk_factors:
-            self._new_individual(_RISK_FACTOR + risk_factor.risk_factor_id, _RISK_FACTORS)
+            self._new_individual(_RISK_FACTOR + risk_factor.risk_factor_id, [])
 
     def _fill(self, subject_id: str, prop: str, value: str) -> None:
         """State that every member of the subject (a category or one drug) has ``prop`` = value."""
@@ -239,18 +259,22 @@ class _Export:
         for disjoint_set in self.data.disjoint_sets:
             self.owl.AllDisjoint([self.classes[c] for c in disjoint_set.category_ids])
 
+    def _class_pair_rule(self, a: str, b: str) -> None:
+        rule = self.owl.Imp()
+        rule.set_as_rule(
+            f"{_CLASS}{a}(?a), {_CLASS}{b}(?b), DifferentFrom(?a, ?b) -> {_INTERACTS}(?a, ?b)"
+        )
+
     def _declare_interactions(self) -> None:
         for link in self.data.interactions:
-            if link.subject_a in self.classes and link.subject_b in self.classes:
-                for a, b in ((link.subject_a, link.subject_b), (link.subject_b, link.subject_a)):
-                    rule = self.owl.Imp()
-                    rule.set_as_rule(
-                        f"{_CLASS}{a}(?a), {_CLASS}{b}(?b), DifferentFrom(?a, ?b) "
-                        f"-> {_INTERACTS}(?a, ?b)"
-                    )
+            a, b = link.subject_a, link.subject_b
+            if a in self.classes and b in self.classes:
+                # A self-link's rule is symmetric already: one rule, not two identical ones.
+                pairs = [(a, b)] if a == b else [(a, b), (b, a)]
+                for first, second in pairs:
+                    self._class_pair_rule(first, second)
             else:
-                a_ind = self.individuals[_DRUG + link.subject_a]
-                b_ind = self.individuals[_DRUG + link.subject_b]
+                a_ind, b_ind = self.individuals[_DRUG + a], self.individuals[_DRUG + b]
                 a_ind.interacts.append(b_ind)
                 b_ind.interacts.append(a_ind)
 
@@ -258,22 +282,21 @@ class _Export:
         """Add one individual ``P_<c>`` of class c per category."""
         with self.onto:
             for category_id in category_ids:
-                self._new_individual(_PROTOTYPE + category_id, category_id)
+                self._new_individual(_PROTOTYPE + category_id, [category_id])
 
     def add_membership(self, drug_id: str, category_id: str) -> None:
         """Tell one extra class assertion (a mutation)."""
         self.individuals[_DRUG + drug_id].is_a.append(self.classes[category_id])
 
     def add_mutation_classes(
-        self, mutations: Sequence[tuple[str, str]], leaf: Mapping[str, str]
+        self, mutations: Sequence[tuple[str, str]], told: Mapping[str, Sequence[str]]
     ) -> None:
-        """Declare M_i ≡ leaf(d) ⊓ K for every mutation (d, K)."""
+        """Declare M_i ≡ told(d) ⊓ K for every mutation (d, K), told(d) = ⊓ of d's told classes."""
         with self.onto:
             for index, (drug_id, category_id) in enumerate(mutations):
                 mutation = _new_class(f"{_MUTATION}{index}", (self.owl.Thing,))
-                mutation.equivalent_to.append(
-                    self.classes[leaf[drug_id]] & self.classes[category_id]
-                )
+                operands = [self.classes[c] for c in (*told[drug_id], category_id)]
+                mutation.equivalent_to.append(self.owl.And(operands))
 
     def reason(self) -> None:
         """Declare every individual different from every other one, then run HermiT."""
@@ -371,11 +394,12 @@ def reason_with_prototypes(data: OntologyData, category_ids: Sequence[str]) -> O
 def unsatisfiable_mutations(
     data: OntologyData, mutations: Sequence[tuple[str, str]]
 ) -> frozenset[tuple[str, str]]:
-    """Return the mutations (d, K) whose class leaf(d) ⊓ K is unsatisfiable, in one HermiT run.
+    """Return the mutations (d, K) whose class told(d) ⊓ K is unsatisfiable, in one HermiT run.
 
-    A mutation d ∈ K makes the ontology inconsistent iff leaf(d) ⊓ K is unsatisfiable, because d's
-    only told type is its leaf and the SWRL rules only add role assertions, which cannot clash
-    here. :func:`mutation_is_consistent` checks this equivalence on real per-mutation runs.
+    told(d) is the intersection of d's told classes. A mutation d ∈ K makes the ontology
+    inconsistent iff told(d) ⊓ K is unsatisfiable, because d's only assertions are its told
+    classes and the SWRL rules only add role assertions, which cannot clash here.
+    :func:`mutation_is_consistent` checks this equivalence on real per-mutation runs.
 
     Raises
     ------
@@ -384,8 +408,7 @@ def unsatisfiable_mutations(
     """
     owl = _owlready()
     export = _Export(owl, data)
-    leaf = {m.object_id: m.category_id for m in data.memberships}
-    export.add_mutation_classes(mutations, leaf)
+    export.add_mutation_classes(mutations, _told_types(data))
     run = _run(export)
     unsatisfiable = set(run.unsatisfiable)
     return frozenset(

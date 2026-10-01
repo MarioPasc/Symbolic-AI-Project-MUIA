@@ -23,6 +23,7 @@ from symbolic_ai.dataloader.io import (
 from symbolic_ai.dataloader.models import (
     AdverseInteraction,
     Category,
+    CategoryDefinition,
     Condition,
     Contraindication,
     ContraindicationLink,
@@ -46,6 +47,7 @@ from symbolic_ai.dataloader.models import (
 __all__ = [
     "AdverseInteraction",
     "Category",
+    "CategoryDefinition",
     "Condition",
     "Contraindication",
     "ContraindicationLink",
@@ -325,6 +327,19 @@ def _subcategories(
     return tuple(sorted(items, key=lambda e: (e.category_id, e.parent_id)))
 
 
+def _definitions(
+    directory: Path, package: DataPackage, target_version: _SemVer
+) -> tuple[CategoryDefinition, ...]:
+    rows = _versioned_rows(directory, package, "ontology_definitions", target_version)
+    conjuncts: dict[str, set[str]] = defaultdict(set)
+    for row in rows:
+        conjuncts[_as_str(row["category_id"])].add(_as_str(row["conjunct_id"]))
+    return tuple(
+        CategoryDefinition(category_id, tuple(sorted(conjuncts[category_id])))
+        for category_id in sorted(conjuncts)
+    )
+
+
 def _memberships(
     directory: Path, package: DataPackage, target_version: _SemVer
 ) -> tuple[Membership, ...]:
@@ -462,6 +477,7 @@ def load_ontology(data_dir: Path | None = None, version: str | None = None) -> O
         coprescriptions=_coprescription_links(directory, package, target_version),
         families=_families(directory, package, target_version),
         disjoint_sets=_disjoint_sets(directory, package, target_version),
+        definitions=_definitions(directory, package, target_version),
     )
 
 

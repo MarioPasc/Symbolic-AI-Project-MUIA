@@ -53,8 +53,9 @@ def _print_summary(data_dir: Path) -> None:
     ontology = load_ontology(data_dir)
     print(
         f"ontology: {len(ontology.categories)} categories, "
-        f"{len(ontology.subcategories)} subcategory "
-        f"links, {len(ontology.memberships)} memberships, {len(ontology.indications)} indications, "
+        f"{len(ontology.subcategories)} subcategory links, {len(ontology.definitions)} "
+        f"definitions, {len(ontology.memberships)} memberships, {len(ontology.indications)} "
+        "indications, "
         f"{len(ontology.contraindications)} contraindications, {len(ontology.interactions)} "
         f"interactions, {len(ontology.coprescriptions)} coprescriptions, "
         f"{len(ontology.families)} families, {len(ontology.disjoint_sets)} disjoint sets"

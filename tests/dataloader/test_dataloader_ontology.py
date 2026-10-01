@@ -1,6 +1,7 @@
 """``load_ontology`` on the real data 1.1.0 and one broken fixture per ontology validation rule.
 
-The content checked here is the frozen table of the EJ2 results design §6.1.
+The content checked here is the frozen table of the EJ2 results design §6.1, as amended by §11.1
+(R1 multiple inheritance, R2 a category defined by its conjuncts, R3a no upper ontology).
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from symbolic_ai.dataloader import (
+    CategoryDefinition,
     DatabaseValidationError,
     load_formulary,
     load_ontology,
@@ -42,15 +44,23 @@ def test_ontology_table_counts(real_data_dir: Path) -> None:
     ontology = load_ontology(data_dir=real_data_dir)
     assert ontology.version == "1.1.0"
     assert len(ontology.categories) == 33
-    assert len(ontology.subcategories) == 31
-    assert len(ontology.memberships) == 18
+    assert len(ontology.subcategories) == 36
+    assert len(ontology.definitions) == 1
+    assert len(ontology.memberships) == 19
     assert len(ontology.indications) == 6
     assert len(ontology.contraindications) == 10
-    assert len(ontology.interactions) == 5
+    assert len(ontology.interactions) == 3
     assert len(ontology.coprescriptions) == 1
     assert len(ontology.families) == 5
-    assert len(ontology.disjoint_sets) == 8
-    assert sum(s.partition_of is not None for s in ontology.disjoint_sets) == 5
+    assert len(ontology.disjoint_sets) == 7
+    assert sum(s.partition_of is not None for s in ontology.disjoint_sets) == 4
+
+
+def test_the_upper_ontology_is_gone(real_data_dir: Path) -> None:
+    ontology = load_ontology(data_dir=real_data_dir)
+    category_ids = {c.category_id for c in ontology.categories}
+    assert category_ids.isdisjoint({"clinical_objects", "conditions", "risk_factors"})
+    assert "upper" not in {s.set_id for s in ontology.disjoint_sets}
 
 
 def test_ontology_carries_the_formulary_identifiers(real_data_dir: Path) -> None:
@@ -61,21 +71,41 @@ def test_ontology_carries_the_formulary_identifiers(real_data_dir: Path) -> None
     assert ontology.risk_factors == formulary.risk_factors
 
 
-def test_every_drug_has_exactly_one_told_membership(real_data_dir: Path) -> None:
+def test_every_drug_has_a_told_membership_and_tramadol_has_two(real_data_dir: Path) -> None:
     ontology = load_ontology(data_dir=real_data_dir)
-    members = sorted(m.object_id for m in ontology.memberships)
-    assert members == sorted(d.drug_id for d in ontology.drugs)
+    assert {m.object_id for m in ontology.memberships} == {d.drug_id for d in ontology.drugs}
+    tramadol = [m.category_id for m in ontology.memberships if m.object_id == "tramadol"]
+    assert tramadol == ["opioids", "serotonergic_drugs"]
 
 
-def test_contraindication_links_split_into_nine_categories_and_one_drug(
-    real_data_dir: Path,
-) -> None:
+def test_ssris_have_three_told_parents(real_data_dir: Path) -> None:
+    ontology = load_ontology(data_dir=real_data_dir)
+    parents = [e.parent_id for e in ontology.subcategories if e.category_id == "ssris"]
+    assert parents == ["antidepressants", "bleeding_risk_drugs", "serotonergic_drugs"]
+
+
+def test_serotonergic_opioids_is_defined_by_two_conjuncts(real_data_dir: Path) -> None:
+    ontology = load_ontology(data_dir=real_data_dir)
+    assert ontology.definitions == (
+        CategoryDefinition("serotonergic_opioids", ("opioids", "serotonergic_drugs")),
+    )
+    assert "serotonergic_opioids" not in {e.category_id for e in ontology.subcategories}
+
+
+def test_every_contraindication_link_is_on_a_category(real_data_dir: Path) -> None:
     ontology = load_ontology(data_dir=real_data_dir)
     category_ids = {c.category_id for c in ontology.categories}
-    on_categories = [c for c in ontology.contraindications if c.subject_id in category_ids]
-    assert len(on_categories) == 9
-    assert [c.subject_id for c in ontology.contraindications if c not in on_categories] == [
-        "tramadol"
+    assert all(c.subject_id in category_ids for c in ontology.contraindications)
+    epilepsy = [c.subject_id for c in ontology.contraindications if c.risk_factor_id == "EPI"]
+    assert epilepsy == ["serotonergic_opioids"]
+
+
+def test_interactions_are_three_self_links(real_data_dir: Path) -> None:
+    ontology = load_ontology(data_dir=real_data_dir)
+    assert [(i.subject_a, i.subject_b) for i in ontology.interactions] == [
+        ("bleeding_risk_drugs", "bleeding_risk_drugs"),
+        ("bradycardic_drugs", "bradycardic_drugs"),
+        ("serotonergic_drugs", "serotonergic_drugs"),
     ]
 
 
@@ -94,7 +124,7 @@ def test_disjoint_sets_are_sorted_with_their_partitions(real_data_dir: Path) -> 
 def test_no_ontology_exists_at_version_1_0_0(real_data_dir: Path) -> None:
     with pytest.raises(DatabaseValidationError) as excinfo:
         load_ontology(data_dir=real_data_dir, version="1.0.0")
-    assert len(excinfo.value.problems) == 18  # every drug lacks its told membership
+    assert len(excinfo.value.problems) == 18  # every drug lacks a told membership
 
 
 def test_formulary_1_0_0_is_unchanged_by_data_1_1_0(real_data_dir: Path) -> None:
@@ -133,23 +163,43 @@ def test_overlapping_subject_namespaces_are_reported(sandbox_data_dir: Path) -> 
 def test_cyclic_subcategory_graph_is_reported(sandbox_data_dir: Path) -> None:
     _append(sandbox_data_dir / "ontology" / "subcategories.csv", "drugs,nsaids,1.1.0")
     problems = _problems(sandbox_data_dir)
-    assert any("subcategory graph has a cycle" in p for p in problems)
+    assert any("definition edges has a cycle" in p for p in problems)
+
+
+def test_cycle_through_a_definition_edge_is_reported(sandbox_data_dir: Path) -> None:
+    # serotonergic_drugs ⊂ serotonergic_opioids, while the definition puts serotonergic_opioids
+    # below serotonergic_drugs: acyclic as a subcategory graph, cyclic with the definition edges.
+    _append(
+        sandbox_data_dir / "ontology" / "subcategories.csv",
+        "serotonergic_drugs,serotonergic_opioids,1.1.0",
+    )
+    problems = _problems(sandbox_data_dir)
+    cycles = [p for p in problems if "definition edges has a cycle" in p]
+    assert len(cycles) == 1
+    assert "serotonergic_drugs" in cycles[0] and "serotonergic_opioids" in cycles[0]
 
 
 def test_unordered_interaction_subjects_are_reported(sandbox_data_dir: Path) -> None:
-    _replace(
+    _append(
         sandbox_data_dir / "ontology" / "interactions.csv",
-        "anticoagulants,nsaids,",
-        "nsaids,anticoagulants,",
+        "nsaids,anticoagulants,bleeding,major,1.1.0",
     )
     problems = _problems(sandbox_data_dir)
-    assert any("subject_a='nsaids'" in p and "lexicographically" in p for p in problems)
+    assert any("subject_a='nsaids'" in p and "lexicographically after" in p for p in problems)
 
 
-def test_second_told_membership_is_reported(sandbox_data_dir: Path) -> None:
-    _append(sandbox_data_dir / "ontology" / "memberships.csv", "ibuprofen,opioids,1.1.0")
-    problems = _problems(sandbox_data_dir)
-    assert any("object_id='ibuprofen'" in p and "2 told memberships" in p for p in problems)
+def test_self_link_interactions_are_valid(sandbox_data_dir: Path) -> None:
+    _append(
+        sandbox_data_dir / "ontology" / "interactions.csv", "nsaids,nsaids,bleeding,major,1.1.0"
+    )
+    validate_database(data_dir=sandbox_data_dir)
+
+
+def test_second_told_membership_is_valid(sandbox_data_dir: Path) -> None:
+    _append(sandbox_data_dir / "ontology" / "memberships.csv", "sertraline,opioids,1.1.0")
+    validate_database(data_dir=sandbox_data_dir)
+    told = [m for m in load_ontology(data_dir=sandbox_data_dir).memberships]
+    assert [m.category_id for m in told if m.object_id == "sertraline"] == ["opioids", "ssris"]
 
 
 def test_missing_membership_fails_load_ontology_but_not_the_database(
@@ -160,7 +210,45 @@ def test_missing_membership_fails_load_ontology_but_not_the_database(
     with pytest.raises(DatabaseValidationError) as excinfo:
         load_ontology(data_dir=sandbox_data_dir)
     assert excinfo.value.problems == (
-        "ontology_memberships: drug 'ibuprofen' has no told membership, expected exactly one",
+        "ontology_memberships: drug 'ibuprofen' has no told membership, expected at least one",
+    )
+
+
+def test_unknown_conjunct_is_reported(sandbox_data_dir: Path) -> None:
+    _append(sandbox_data_dir / "ontology" / "definitions.csv", "serotonergic_opioids,ghosts,1.1.0")
+    problems = _problems(sandbox_data_dir)
+    assert any("'ghosts' does not match any ontology_categories" in p for p in problems)
+
+
+def test_definition_with_one_conjunct_is_reported(sandbox_data_dir: Path) -> None:
+    _replace(
+        sandbox_data_dir / "ontology" / "definitions.csv",
+        "serotonergic_opioids,serotonergic_drugs,1.1.0\n",
+        "",
+    )
+    problems = _problems(sandbox_data_dir)
+    assert problems == (
+        "ontology_definitions[category_id='serotonergic_opioids']: fewer than two conjuncts",
+    )
+
+
+def test_defined_category_with_a_told_member_is_reported(sandbox_data_dir: Path) -> None:
+    _append(
+        sandbox_data_dir / "ontology" / "memberships.csv", "tramadol,serotonergic_opioids,1.1.0"
+    )
+    problems = _problems(sandbox_data_dir)
+    assert any(
+        "category_id='serotonergic_opioids'" in p and "no told member" in p for p in problems
+    )
+
+
+def test_defined_category_with_a_told_parent_is_reported(sandbox_data_dir: Path) -> None:
+    _append(
+        sandbox_data_dir / "ontology" / "subcategories.csv", "serotonergic_opioids,opioids,1.1.0"
+    )
+    problems = _problems(sandbox_data_dir)
+    assert any(
+        "category_id='serotonergic_opioids'" in p and "no told parent" in p for p in problems
     )
 
 
@@ -186,7 +274,9 @@ def test_inconsistent_partition_of_is_reported(sandbox_data_dir: Path) -> None:
 
 def test_all_ontology_problems_are_reported_at_once(sandbox_data_dir: Path) -> None:
     _append(sandbox_data_dir / "ontology" / "subcategories.csv", "drugs,nsaids,1.1.0")
-    _append(sandbox_data_dir / "ontology" / "memberships.csv", "ibuprofen,opioids,1.1.0")
+    _append(
+        sandbox_data_dir / "ontology" / "memberships.csv", "tramadol,serotonergic_opioids,1.1.0"
+    )
     problems = _problems(sandbox_data_dir)
     assert any("cycle" in p for p in problems)
-    assert any("2 told memberships" in p for p in problems)
+    assert any("no told member" in p for p in problems)

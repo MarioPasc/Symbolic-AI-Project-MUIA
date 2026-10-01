@@ -121,11 +121,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def _print_classification(reasoned: ReasonedOntology, drug_id: str) -> None:
+    ontology = reasoned.ontology
     categories = classify(reasoned, drug_id)
-    defined = set(reasoned.ontology.defined_ids)
-    print(f"{drug_id}: leaf category {reasoned.ontology.leaf_of(drug_id)}")
+    defined = set(ontology.defined_ids) | set(ontology.conjunctive_ids)
+    print(f"{drug_id}: told categories {', '.join(ontology.told_categories_of(drug_id))}")
     print(f"  categories: {', '.join(c for c in categories if c not in defined)}")
     print(f"  defined categories: {', '.join(c for c in categories if c in defined) or '-'}")
+    for category_id in ontology.told_categories_of(drug_id):
+        inherited = inherited_by_new_member(reasoned, category_id)
+        print(f"  a new member of {category_id} would receive {inherited.rows} formulary rows")
 
 
 def _print_taxonomy(reasoned: ReasonedOntology) -> None:
@@ -249,11 +253,11 @@ def _print_summary(
         f"{len(consistency.inconsistent_categories)}/{consistency.categories_checked}, "
         f"HermiT consistent {consistency.oracle_kb_consistent}"
     )
+    by_set = ", ".join(f"{s} {n}" for s, n in consistency.n_clash_expected_by_set.items())
     print(
         f"  mutations {consistency.n_mutations}: clash expected {consistency.n_clash_expected} "
-        f"(upper partition {consistency.n_clash_expected_from_upper}), detected "
-        f"{consistency.n_clash_detected}; no clash expected {consistency.n_no_clash_expected}, "
-        f"false alarms {consistency.n_false_alarms}"
+        f"({by_set}), detected {consistency.n_clash_detected}; no clash expected "
+        f"{consistency.n_no_clash_expected}, false alarms {consistency.n_false_alarms}"
     )
     print(f"  single run: {_agreement_text(consistency.oracle_single_run)}")
     print(f"  per-mutation runs: {_agreement_text(consistency.oracle_rechecked)}")
@@ -333,8 +337,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         except UnknownIdentifierError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
-        inherited = inherited_by_new_member(reasoned, ontology.leaf_of(args.classify))
-        print(f"  a new member of its leaf would receive {inherited.rows} formulary rows")
         return 0
     if args.taxonomy:
         _print_taxonomy(reason(ontology))

@@ -63,9 +63,27 @@ def test_hermit_classifies_every_drug_as_forward_chaining(
 
 @pytest.mark.integration
 @requires_oracle
-def test_hermit_derives_the_extra_interaction(base_run: owl_oracle.OracleRun) -> None:
+def test_hermit_derives_the_extra_interactions(base_run: owl_oracle.OracleRun) -> None:
     assert "D_apixaban" in base_run.individuals["D_sertraline"].interacts
     assert "D_sertraline" not in base_run.individuals["D_sertraline"].interacts
+    # Same-category pairs from the self-links; never a drug with itself.
+    assert "D_warfarin" in base_run.individuals["D_apixaban"].interacts
+    assert "D_propranolol" in base_run.individuals["D_bisoprolol"].interacts
+    assert "D_apixaban" not in base_run.individuals["D_apixaban"].interacts
+
+
+@pytest.mark.integration
+@requires_oracle
+def test_hermit_classifies_tramadol_into_the_defined_category(
+    base_run: owl_oracle.OracleRun,
+) -> None:
+    tramadol = base_run.individuals["D_tramadol"]
+    assert {"opioids", "serotonergic_drugs", "serotonergic_opioids"} <= tramadol.categories
+    assert "contraindicated_EPI" in tramadol.categories
+    assert tramadol.contraindicated_by == {"EPI"}
+    assert {"opioids", "serotonergic_drugs", "contraindicated_EPI"} <= base_run.subsumers[
+        "serotonergic_opioids"
+    ]
 
 
 @pytest.mark.integration
@@ -87,7 +105,8 @@ def test_hermit_hierarchy_equals_the_prototype_taxonomy(
         ("ibuprofen", "opioids", False),
         ("ibuprofen", "antidepressants", True),
         ("ibuprofen", "serotonergic_opioids", False),
-        ("warfarin", "conditions", False),
+        ("tramadol", "nsaids", False),
+        ("sertraline", "opioids", True),
     ],
 )
 def test_per_mutation_runs_on_hand_checked_cases(
@@ -101,11 +120,13 @@ def test_per_mutation_runs_on_hand_checked_cases(
 def test_single_run_mutation_classes_agree_with_per_mutation_runs(
     real_ontology: Ontology,
 ) -> None:
+    # tramadol's mutation class is opioids ⊓ serotonergic_drugs ⊓ nsaids: both told classes count.
     mutations = [
         ("ibuprofen", "opioids"),
         ("ibuprofen", "antidepressants"),
         ("ibuprofen", "serotonergic_opioids"),
-        ("warfarin", "conditions"),
+        ("tramadol", "nsaids"),
+        ("sertraline", "opioids"),
     ]
     unsatisfiable = owl_oracle.unsatisfiable_mutations(real_ontology.data, mutations)
     assert unsatisfiable == {mutations[0], mutations[2], mutations[3]}
@@ -120,7 +141,7 @@ def test_prototype_individuals_inherit_like_forward_chaining(real_ontology: Onto
     assert prototype.contraindicated_by == {"CKD"}
     assert prototype.requires == {("AGE65", "omeprazole")}
     drugs = {name for name in prototype.interacts if name.startswith("D_")}
-    assert drugs == {"D_apixaban", "D_sertraline", "D_warfarin"}
+    assert drugs == {"D_apixaban", "D_ibuprofen", "D_sertraline", "D_warfarin"}
 
 
 @requires_oracle

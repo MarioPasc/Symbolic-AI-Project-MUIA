@@ -1,9 +1,10 @@
 """Validation of the database against every rule of ``01-database.md`` section 5.
 
-Since data 1.1.0 it also checks the ontology tables (EJ2 results design §6.1): link subjects resolve
-to a category or a drug, the two namespaces are disjoint, the subcategory graph is acyclic,
-``subject_a < subject_b``, at most one told membership per drug, and every disjoint set has at
-least two members and one consistent ``partition_of``.
+Since data 1.1.0 it also checks the ontology tables (EJ2 results design §6.1, amended by §11.1):
+link subjects resolve to a category or a drug, the two namespaces are disjoint,
+``subject_a <= subject_b`` (a self-link is allowed), every defined category has at least two
+conjuncts, no told parent and no told member, the graph of subcategory and definition edges is
+acyclic, and every disjoint set has at least two members and one consistent ``partition_of``.
 
 Every check reads the raw (untyped) rows of every resource and returns the problems it finds
 instead of raising, so that :func:`collect_problems` reports every violation of the database in one
@@ -347,6 +348,7 @@ def _check_age65_and_preg_consistency(raw: RawTable) -> list[str]:
 
 _ONTOLOGY_CATEGORIES = "ontology_categories"
 _ONTOLOGY_SUBCATEGORIES = "ontology_subcategories"
+_ONTOLOGY_DEFINITIONS = "ontology_definitions"
 _ONTOLOGY_MEMBERSHIPS = "ontology_memberships"
 _ONTOLOGY_DISJOINT_SETS = "ontology_disjoint_sets"
 _ONTOLOGY_INTERACTIONS = "ontology_interactions"
@@ -384,46 +386,70 @@ def _check_link_subjects_resolve(raw: RawTable) -> list[str]:
 
 
 def _check_interaction_subject_order(raw: RawTable) -> list[str]:
-    """``ontology_interactions``: ``subject_a < subject_b`` (no self-pairs)."""
+    """``ontology_interactions``: ``subject_a <= subject_b`` (a self-link a = b is allowed)."""
     problems: list[str] = []
     for row in _rows(raw, _ONTOLOGY_INTERACTIONS):
         a, b = row.get("subject_a"), row.get("subject_b")
-        if a is not None and b is not None and not a < b:
+        if a is not None and b is not None and not a <= b:
             problems.append(
-                f"ontology_interactions[subject_a={a!r}, subject_b={b!r}]: subject_a must be "
-                "lexicographically before subject_b"
+                f"ontology_interactions[subject_a={a!r}, subject_b={b!r}]: subject_a must not be "
+                "lexicographically after subject_b"
             )
     return problems
 
 
-def _check_subcategories_acyclic(raw: RawTable) -> list[str]:
-    """Check that the subcategory graph (child -> parents) has no cycle."""
+def _edges(raw: RawTable, resource_name: str, child: str, parent: str) -> list[tuple[str, str]]:
+    """Return the (child, parent) pairs of a two-column link table, skipping incomplete rows."""
+    return [
+        (c, p)
+        for row in _rows(raw, resource_name)
+        if (c := row.get(child)) is not None and (p := row.get(parent)) is not None
+    ]
+
+
+def _check_taxonomy_acyclic(raw: RawTable) -> list[str]:
+    """Check that subcategory and definition edges together (child -> parents) have no cycle.
+
+    A defined category sits below each of its conjuncts, so a definition edge counts as a parent
+    edge: a category defined through one of its own subcategories would be circular.
+    """
     parents: dict[str, set[str]] = defaultdict(set)
-    for row in _rows(raw, _ONTOLOGY_SUBCATEGORIES):
-        child, parent = row.get("category_id"), row.get("parent_id")
-        if child is not None and parent is not None:
-            parents[child].add(parent)
+    edges = _edges(raw, _ONTOLOGY_SUBCATEGORIES, "category_id", "parent_id")
+    edges += _edges(raw, _ONTOLOGY_DEFINITIONS, "category_id", "conjunct_id")
+    for child, parent in edges:
+        parents[child].add(parent)
     try:
         tuple(graphlib.TopologicalSorter(parents).static_order())
     except graphlib.CycleError as exc:
         cycle = " -> ".join(str(node) for node in exc.args[1])
-        return [f"ontology_subcategories: the subcategory graph has a cycle ({cycle})"]
+        return [
+            "ontology_subcategories + ontology_definitions: the graph of subcategory and "
+            f"definition edges has a cycle ({cycle})"
+        ]
     return []
 
 
-def _check_at_most_one_membership(raw: RawTable) -> list[str]:
-    """Every drug has at most one told membership (its leaf category)."""
-    counts = Counter(
-        object_id
-        for row in _rows(raw, _ONTOLOGY_MEMBERSHIPS)
-        if (object_id := row.get("object_id")) is not None
-    )
-    return [
-        f"ontology_memberships[object_id={object_id!r}]: {counts[object_id]} told memberships, "
-        "expected exactly one"
-        for object_id in sorted(counts)
-        if counts[object_id] > 1
-    ]
+def _check_definitions(raw: RawTable) -> list[str]:
+    """Check that a defined category has at least two conjuncts, no told parent and no told member.
+
+    Its place in the taxonomy and its members follow from the definition alone; a told parent or
+    member would duplicate (or contradict) what the definition entails.
+    """
+    conjuncts: dict[str, set[str]] = defaultdict(set)
+    for category_id, conjunct in _edges(raw, _ONTOLOGY_DEFINITIONS, "category_id", "conjunct_id"):
+        conjuncts[category_id].add(conjunct)
+    with_parent = _ids(raw, _ONTOLOGY_SUBCATEGORIES, "category_id")
+    with_member = _ids(raw, _ONTOLOGY_MEMBERSHIPS, "category_id")
+    problems: list[str] = []
+    for category_id in sorted(conjuncts):
+        label = f"ontology_definitions[category_id={category_id!r}]"
+        if len(conjuncts[category_id]) < 2:
+            problems.append(f"{label}: fewer than two conjuncts")
+        if category_id in with_parent:
+            problems.append(f"{label}: a defined category has no told parent (subcategories row)")
+        if category_id in with_member:
+            problems.append(f"{label}: a defined category has no told member (memberships row)")
+    return problems
 
 
 def _check_disjoint_sets(raw: RawTable) -> list[str]:
@@ -452,8 +478,8 @@ def _check_ontology(raw: RawTable) -> list[str]:
     problems = _check_subject_namespaces_disjoint(raw)
     problems.extend(_check_link_subjects_resolve(raw))
     problems.extend(_check_interaction_subject_order(raw))
-    problems.extend(_check_subcategories_acyclic(raw))
-    problems.extend(_check_at_most_one_membership(raw))
+    problems.extend(_check_taxonomy_acyclic(raw))
+    problems.extend(_check_definitions(raw))
     problems.extend(_check_disjoint_sets(raw))
     return problems
 
@@ -461,9 +487,10 @@ def _check_ontology(raw: RawTable) -> list[str]:
 def missing_memberships(drug_ids: Iterable[str], member_ids: Iterable[str]) -> tuple[str, ...]:
     """Report every drug without a told membership, for :func:`load_ontology`.
 
-    This half of "every drug has exactly one told membership" is checked when the ontology is
-    loaded, not in :func:`collect_problems`: a drug may be added to the formulary in a later data
-    version before it is placed in the ontology, and that must not invalidate the database for EJ1.
+    "Every drug has at least one told membership" is checked when the ontology is loaded, not in
+    :func:`collect_problems`: a drug may be added to the formulary in a later data version before
+    it is placed in the ontology, and that must not invalidate the database for EJ1. A drug may
+    have several told memberships (data 1.1.0, amended: tramadol is told in two categories).
 
     Parameters
     ----------
@@ -479,7 +506,7 @@ def missing_memberships(drug_ids: Iterable[str], member_ids: Iterable[str]) -> t
     """
     missing = sorted(set(drug_ids) - set(member_ids))
     return tuple(
-        f"ontology_memberships: drug {drug_id!r} has no told membership, expected exactly one"
+        f"ontology_memberships: drug {drug_id!r} has no told membership, expected at least one"
         for drug_id in missing
     )
 
