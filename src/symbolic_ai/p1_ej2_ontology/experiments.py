@@ -41,6 +41,7 @@ from symbolic_ai.p1_ej2_ontology.reasoner import (
     contraindication_sources,
     coprescription_sources,
     derive_formulary,
+    drug_members,
     family_pairs,
     family_sources,
     inherited_by_new_member,
@@ -131,7 +132,11 @@ class DerivedRow:
 
 @dataclass(frozen=True, slots=True)
 class FormularyDerivationResult:
-    """P3: the derived formulary compared with the hand-written one, table by table."""
+    """P3: the derived formulary compared with the hand-written one, table by table.
+
+    ``defined_category_members`` lists, for each category defined by conjuncts, the drugs Cl(KB)
+    classifies into it (none is told there).
+    """
 
     derived_version: str
     reference_version: str
@@ -139,6 +144,7 @@ class FormularyDerivationResult:
     rows: tuple[DerivedRow, ...]
     oracle_memberships: OracleAgreement | None
     oracle_rows: OracleAgreement | None
+    defined_category_members: Mapping[str, tuple[str, ...]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -486,6 +492,9 @@ def run_formulary_derivation(
         rows=tuple(rows),
         oracle_memberships=oracle_memberships,
         oracle_rows=oracle_rows,
+        defined_category_members={
+            c: drug_members(reasoned.closure, c) for c in reasoned.ontology.conjunctive_ids
+        },
     )
 
 

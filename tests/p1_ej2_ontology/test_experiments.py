@@ -88,6 +88,13 @@ def test_p3_rows_record_their_provenance(reasoned: ReasonedOntology) -> None:
     assert all(r.oracle_agrees is None for r in result.rows)
 
 
+def test_p3_records_the_drugs_classified_into_the_defined_category(
+    reasoned: ReasonedOntology,
+) -> None:
+    result = run_formulary_derivation(reasoned, load_formulary(version="1.0.0"), oracle_run=None)
+    assert result.defined_category_members == {"serotonergic_opioids": ("tramadol",)}
+
+
 def test_p3_flags_the_extra_pairs_that_are_also_family_pairs(reasoned: ReasonedOntology) -> None:
     result = run_formulary_derivation(reasoned, load_formulary(version="1.0.0"), oracle_run=None)
     interactions = [r for r in result.rows if r.table == "interactions"]

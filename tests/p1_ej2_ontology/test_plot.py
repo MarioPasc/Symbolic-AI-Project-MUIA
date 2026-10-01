@@ -71,7 +71,75 @@ def test_inferred_variant_adds_inherited_rows(results: Mapping[str, object]) -> 
     told = build_ontology_graph(results, inferred=False).source
     inferred = build_ontology_graph(results, inferred=True).source
     assert "trata FA; CI: EMB" in inferred and "trata FA; CI: EMB" not in told
-    assert "clinical_objects" not in told and "clinical_objects" not in inferred
+    assert "trata DOL; CI: EPI" in inferred  # tramadol, through the defined category
+
+
+@requires_dot
+def test_there_is_no_upper_ontology(results: Mapping[str, object]) -> None:
+    for inferred in (False, True):
+        source = build_ontology_graph(results, inferred=inferred).source
+        for upper in ("clinical_objects", "conditions", "risk_factors", "Objetos clínicos"):
+            assert upper not in source
+
+
+@requires_dot
+def test_multiple_inheritance_draws_every_parent_arrow(results: Mapping[str, object]) -> None:
+    source = build_ontology_graph(results, inferred=False).source
+    for parent in ("antidepressants", "bleeding_risk_drugs", "serotonergic_drugs"):
+        assert f"\t{parent} -> ssris [dir=back]" in source
+    assert "\tbradycardic_drugs -> non_dihydropyridines [dir=back]" in source
+    assert "\tbleeding_risk_drugs -> anticoagulants [dir=back]" in source
+
+
+@requires_dot
+def test_defined_category_is_dashed_with_its_definition_and_hollow_arrows(
+    results: Mapping[str, object],
+) -> None:
+    source = build_ontology_graph(results, inferred=False).source
+    node = next(line for line in source.splitlines() if "\tserotonergic_opioids [" in line)
+    assert 'style="rounded,filled,dashed"' in node
+    assert "≡ Opioides ∩ Serotoninérgicos" in node
+    for conjunct in ("opioids", "serotonergic_drugs"):
+        assert f"\t{conjunct} -> serotonergic_opioids [arrowtail=empty dir=back]" in source
+    assert "cluster_serotonergic_opioids" in source
+
+
+@requires_dot
+def test_tramadol_has_two_membership_arrows_and_none_to_the_defined_category(
+    results: Mapping[str, object],
+) -> None:
+    source = build_ontology_graph(results, inferred=False).source
+    arrows = [line for line in source.splitlines() if "-> tramadol [" in line]
+    assert [a.split("->")[0].strip() for a in arrows] == ["opioids", "serotonergic_drugs"]
+    assert all("style=dashed" in a for a in arrows)
+
+
+@requires_dot
+def test_inferred_variant_draws_the_classification_of_tramadol(
+    results: Mapping[str, object],
+) -> None:
+    told = build_ontology_graph(results, inferred=False).source
+    inferred = build_ontology_graph(results, inferred=True).source
+    classification = "\tserotonergic_opioids -> tramadol ["
+    assert classification not in told
+    assert classification in inferred
+
+
+@requires_dot
+def test_self_links_are_loops_with_their_effect(results: Mapping[str, object]) -> None:
+    source = build_ontology_graph(results, inferred=False).source
+    for category_id in ("bleeding_risk_drugs", "bradycardic_drugs", "serotonergic_drugs"):
+        assert f"\t{category_id} -> {category_id} [" in source
+    for effect in ("int.: hemorragia", "int.: bradicardia, BAV", "int.: sínd. serotoninérgico"):
+        assert effect in source
+
+
+@requires_dot
+def test_disjointness_tags_survive_multiple_inheritance(results: Mapping[str, object]) -> None:
+    source = build_ontology_graph(results, inferred=False).source
+    for category_id in ("analgesics", "antidepressants", "antidiabetics"):
+        node = next(line for line in source.splitlines() if f"\t{category_id} [" in line)
+        assert "disjuntas" in node
 
 
 @requires_dot
