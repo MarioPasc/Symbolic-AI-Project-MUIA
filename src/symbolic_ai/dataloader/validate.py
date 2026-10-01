@@ -15,6 +15,7 @@ from symbolic_ai.dataloader import (
     default_data_dir,
     load_encounters,
     load_formulary,
+    load_ontology,
     load_patients,
     validate_database,
 )
@@ -49,6 +50,15 @@ def _print_summary(data_dir: Path) -> None:
     print(f"drug_classes: {len(formulary.drug_classes)} ({total_class_members} members)")
     print(f"patients: {len(patients)}")
     print(f"encounters: {len(encounters)}")
+    ontology = load_ontology(data_dir)
+    print(
+        f"ontology: {len(ontology.categories)} categories, "
+        f"{len(ontology.subcategories)} subcategory "
+        f"links, {len(ontology.memberships)} memberships, {len(ontology.indications)} indications, "
+        f"{len(ontology.contraindications)} contraindications, {len(ontology.interactions)} "
+        f"interactions, {len(ontology.coprescriptions)} coprescriptions, "
+        f"{len(ontology.families)} families, {len(ontology.disjoint_sets)} disjoint sets"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -68,6 +78,8 @@ def main(argv: list[str] | None = None) -> int:
     data_dir = args.data_dir if args.data_dir is not None else default_data_dir()
     try:
         validate_database(data_dir)
+        # Loading the ontology also checks that every drug has a told membership.
+        load_ontology(data_dir)
     except DatabaseValidationError as exc:
         print(f"FAILED: {len(exc.problems)} database problem(s):")
         for problem in exc.problems:

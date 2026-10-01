@@ -1,0 +1,7 @@
+subject_id,condition_id,since
+analgesics,PAIN,1.1.0
+anticoagulants,AF,1.1.0
+antidepressants,DEP,1.1.0
+antidiabetics,T2D,1.1.0
+antihypertensives,HTN,1.1.0
+proton_pump_inhibitors,GERD,1.1.0

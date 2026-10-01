@@ -19,8 +19,16 @@ data/
 ├── README.md                   this file
 ├── CHANGELOG.md                one entry per data version
 ├── formulary/                  stable knowledge, the same for every patient
+├── ontology/                   the same knowledge per drug category (EJ2, since 1.1.0)
 └── patients/                   the cases
 ```
+
+`ontology/` holds the categories (`categories.csv`), their subcategory links (`subcategories.csv`),
+the leaf category of each drug (`memberships.csv`), the links written once per category or drug
+(`indications.csv`, `contraindications.csv`, `interactions.csv`, `coprescriptions.csv`), the
+therapeutic families (`families.csv`) and the disjoint sets and partitions (`disjoint_sets.csv`).
+EJ2 derives the drug-level formulary from these tables; it never reads the drug-level tables of
+`formulary/` except to compare with them.
 
 See `../docs` (private TFM repository, not in this code repository) for the full schema
 specification, `SPECIFICATIONS/01-database.md`.

@@ -1,0 +1,34 @@
+category_id,name_es,name_en,atc_code,since
+ace_inhibitors,IECA,ACE inhibitors,C09A,1.1.0
+analgesics,Analgésicos,Analgesics,,1.1.0
+anilides,Anilidas,Anilides,N02BE,1.1.0
+anticoagulants,Anticoagulantes,Anticoagulants,B01A,1.1.0
+antidepressants,Antidepresivos,Antidepressants,N06A,1.1.0
+antidiabetics,Antidiabéticos,Antidiabetics,A10B,1.1.0
+antihypertensives,Antihipertensivos,Antihypertensives,,1.1.0
+arbs,ARA-II,Angiotensin II receptor blockers,C09C,1.1.0
+beta_blockers,Betabloqueantes,Beta blockers,C07,1.1.0
+biguanides,Biguanidas,Biguanides,A10BA,1.1.0
+calcium_channel_blockers,Calcioantagonistas,Calcium channel blockers,C08,1.1.0
+cardioselective_beta_blockers,Cardioselectivos,Cardioselective beta blockers,C07AB,1.1.0
+clinical_objects,Objetos clínicos,Clinical objects,,1.1.0
+conditions,Condiciones,Conditions,,1.1.0
+dihydropyridines,Dihidropiridínicos,Dihydropyridines,C08C,1.1.0
+direct_oral_anticoagulants,ACOD,Direct oral anticoagulants,B01AF,1.1.0
+dpp4_inhibitors,iDPP-4,DPP-4 inhibitors,A10BH,1.1.0
+drugs,Fármacos,Drugs,,1.1.0
+low_molecular_weight_heparins,HBPM,Low-molecular-weight heparins,B01AB,1.1.0
+non_dihydropyridines,No dihidropiridínicos,Non-dihydropyridines,C08D,1.1.0
+nonselective_beta_blockers,No selectivos,Non-selective beta blockers,C07AA,1.1.0
+nsaids,AINE,NSAIDs,M01A,1.1.0
+opioids,Opioides,Opioids,N02A,1.1.0
+other_antidepressants,Otros antidepresivos,Other antidepressants,N06AX,1.1.0
+proton_pump_inhibitors,IBP,Proton pump inhibitors,A02BC,1.1.0
+raas_blockers,Bloqueantes del SRAA,RAAS blockers,C09,1.1.0
+risk_factors,Factores de riesgo,Risk factors,,1.1.0
+serotonergic_opioids,Opioides serotoninérgicos,Serotonergic opioids,,1.1.0
+ssris,ISRS,SSRIs,N06AB,1.1.0
+sulfonylureas,Sulfonilureas,Sulfonylureas,A10BB,1.1.0
+therapeutic_families,Familias terapéuticas,Therapeutic families,,1.1.0
+thiazides,Tiazidas,Thiazides,C03AA,1.1.0
+vitamin_k_antagonists,AVK,Vitamin K antagonists,B01AA,1.1.0

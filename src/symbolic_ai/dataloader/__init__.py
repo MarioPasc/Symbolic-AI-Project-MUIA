@@ -22,37 +22,56 @@ from symbolic_ai.dataloader.io import (
 )
 from symbolic_ai.dataloader.models import (
     AdverseInteraction,
+    Category,
     Condition,
     Contraindication,
+    ContraindicationLink,
     Coprescription,
+    CoprescriptionLink,
+    DisjointSet,
     Drug,
     DrugClass,
     Encounter,
     Formulary,
+    IndicationLink,
+    InteractionLink,
+    Membership,
+    OntologyData,
     Patient,
     RiskFactor,
     RiskStatus,
+    SubcategoryEdge,
 )
 
 __all__ = [
     "AdverseInteraction",
+    "Category",
     "Condition",
     "Contraindication",
+    "ContraindicationLink",
     "Coprescription",
+    "CoprescriptionLink",
     "DataLoaderError",
     "DatabaseValidationError",
+    "DisjointSet",
     "Drug",
     "DrugClass",
     "Encounter",
     "Formulary",
+    "IndicationLink",
+    "InteractionLink",
+    "Membership",
+    "OntologyData",
     "Patient",
     "RiskFactor",
     "RiskStatus",
+    "SubcategoryEdge",
     "UnknownIdError",
     "default_data_dir",
     "load_encounter",
     "load_encounters",
     "load_formulary",
+    "load_ontology",
     "load_patients",
     "validate_database",
 ]
@@ -277,6 +296,172 @@ def load_formulary(data_dir: Path | None = None, version: str | None = None) -> 
         coprescriptions=_coprescriptions(directory, package, target_version),
         drug_classes=_drug_classes(directory, package, target_version),
         class_members=_class_members(directory, package, target_version),
+    )
+
+
+def _categories(
+    directory: Path, package: DataPackage, target_version: _SemVer
+) -> tuple[Category, ...]:
+    rows = _versioned_rows(directory, package, "ontology_categories", target_version)
+    items = [
+        Category(
+            category_id=_as_str(row["category_id"]),
+            name_es=_as_str(row["name_es"]),
+            name_en=_as_str(row["name_en"]),
+            atc_code=_as_optional_str(row["atc_code"]),
+        )
+        for row in rows
+    ]
+    return tuple(sorted(items, key=lambda c: c.category_id))
+
+
+def _subcategories(
+    directory: Path, package: DataPackage, target_version: _SemVer
+) -> tuple[SubcategoryEdge, ...]:
+    rows = _versioned_rows(directory, package, "ontology_subcategories", target_version)
+    items = [
+        SubcategoryEdge(_as_str(row["category_id"]), _as_str(row["parent_id"])) for row in rows
+    ]
+    return tuple(sorted(items, key=lambda e: (e.category_id, e.parent_id)))
+
+
+def _memberships(
+    directory: Path, package: DataPackage, target_version: _SemVer
+) -> tuple[Membership, ...]:
+    rows = _versioned_rows(directory, package, "ontology_memberships", target_version)
+    items = [Membership(_as_str(row["object_id"]), _as_str(row["category_id"])) for row in rows]
+    return tuple(sorted(items, key=lambda m: (m.object_id, m.category_id)))
+
+
+def _indication_links(
+    directory: Path, package: DataPackage, target_version: _SemVer
+) -> tuple[IndicationLink, ...]:
+    rows = _versioned_rows(directory, package, "ontology_indications", target_version)
+    items = [
+        IndicationLink(_as_str(row["subject_id"]), _as_str(row["condition_id"])) for row in rows
+    ]
+    return tuple(sorted(items, key=lambda i: (i.subject_id, i.condition_id)))
+
+
+def _contraindication_links(
+    directory: Path, package: DataPackage, target_version: _SemVer
+) -> tuple[ContraindicationLink, ...]:
+    rows = _versioned_rows(directory, package, "ontology_contraindications", target_version)
+    items = [
+        ContraindicationLink(
+            subject_id=_as_str(row["subject_id"]),
+            risk_factor_id=_as_str(row["risk_factor_id"]),
+            reason=_as_str(row["reason"]),
+        )
+        for row in rows
+    ]
+    return tuple(sorted(items, key=lambda c: (c.subject_id, c.risk_factor_id)))
+
+
+def _interaction_links(
+    directory: Path, package: DataPackage, target_version: _SemVer
+) -> tuple[InteractionLink, ...]:
+    rows = _versioned_rows(directory, package, "ontology_interactions", target_version)
+    items = [
+        InteractionLink(
+            subject_a=_as_str(row["subject_a"]),
+            subject_b=_as_str(row["subject_b"]),
+            effect=_as_str(row["effect"]),
+            severity=_as_str(row["severity"]),
+        )
+        for row in rows
+    ]
+    return tuple(sorted(items, key=lambda i: (i.subject_a, i.subject_b)))
+
+
+def _coprescription_links(
+    directory: Path, package: DataPackage, target_version: _SemVer
+) -> tuple[CoprescriptionLink, ...]:
+    rows = _versioned_rows(directory, package, "ontology_coprescriptions", target_version)
+    items = [
+        CoprescriptionLink(
+            subject_id=_as_str(row["subject_id"]),
+            risk_factor_id=_as_str(row["risk_factor_id"]),
+            companion_drug_id=_as_str(row["companion_drug_id"]),
+            reason=_as_str(row["reason"]),
+        )
+        for row in rows
+    ]
+    return tuple(sorted(items, key=lambda c: (c.subject_id, c.risk_factor_id, c.companion_drug_id)))
+
+
+def _families(directory: Path, package: DataPackage, target_version: _SemVer) -> tuple[str, ...]:
+    rows = _versioned_rows(directory, package, "ontology_families", target_version)
+    return tuple(sorted(_as_str(row["category_id"]) for row in rows))
+
+
+def _disjoint_sets(
+    directory: Path, package: DataPackage, target_version: _SemVer
+) -> tuple[DisjointSet, ...]:
+    rows = _versioned_rows(directory, package, "ontology_disjoint_sets", target_version)
+    members: dict[str, set[str]] = defaultdict(set)
+    partition_of: dict[str, str | None] = {}
+    for row in rows:
+        set_id = _as_str(row["set_id"])
+        members[set_id].add(_as_str(row["category_id"]))
+        # Validation guarantees one partition_of value per set.
+        partition_of[set_id] = _as_optional_str(row["partition_of"])
+    return tuple(
+        DisjointSet(set_id, tuple(sorted(members[set_id])), partition_of[set_id])
+        for set_id in sorted(members)
+    )
+
+
+def load_ontology(data_dir: Path | None = None, version: str | None = None) -> OntologyData:
+    """Load the ontology tables as of ``version`` (default: the database version); validates first.
+
+    The drug-level formulary tables (candidates, contraindications, adverse interactions,
+    coprescriptions, drug classes and members) are never read into the result, so that what is
+    derived from the ontology can be compared with them (EJ2, decision K6).
+
+    Parameters
+    ----------
+    data_dir : Path | None
+        Database directory (default: :func:`default_data_dir`).
+    version : str | None
+        Data version; rows with ``since`` newer than it are left out.
+
+    Returns
+    -------
+    OntologyData
+        The ontology tables, with the drugs, conditions and risk factors of that version.
+
+    Raises
+    ------
+    DatabaseValidationError
+        If the database is invalid, or a drug of that version has no told membership.
+    """
+    directory = _resolve_data_dir(data_dir)
+    validate_database(directory)
+    package = read_descriptor(directory)
+    version_text = version if version is not None else package.version
+    target_version = parse_semver(version_text)
+    drugs = _drugs(directory, package, target_version)
+    memberships = _memberships(directory, package, target_version)
+    problems = validation.missing_memberships(
+        (d.drug_id for d in drugs), (m.object_id for m in memberships)
+    )
+    if problems:
+        raise DatabaseValidationError(problems)
+    return OntologyData(
+        version=version_text,
+        drugs=drugs,
+        conditions=_conditions(directory, package, target_version),
+        risk_factors=_risk_factors(directory, package, target_version),
+        categories=_categories(directory, package, target_version),
+        subcategories=_subcategories(directory, package, target_version),
+        memberships=memberships,
+        indications=_indication_links(directory, package, target_version),
+        contraindications=_contraindication_links(directory, package, target_version),
+        interactions=_interaction_links(directory, package, target_version),
+        coprescriptions=_coprescription_links(directory, package, target_version),
+        families=_families(directory, package, target_version),
+        disjoint_sets=_disjoint_sets(directory, package, target_version),
     )
 
 
