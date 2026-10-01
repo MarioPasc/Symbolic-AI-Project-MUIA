@@ -1,7 +1,7 @@
 """EJ2: an ontology of drug categories and forward chaining over it, checked against HermiT.
 
 The category-level knowledge of the formulary (data 1.1.0) is written as first-order definite
-clauses (axioms O1-O7); forward chaining (AIMA Fig. 9.3 with the incremental rule of §9.3.3)
+clauses (axioms O1-O6); forward chaining (AIMA Fig. 9.3 with the incremental rule of §9.3.3)
 computes its fixed point, on which classification, subsumption and consistency are queries, and
 from which EJ1's drug-level formulary is derived. The figure module (:mod:`.plot`, Graphviz) and
 the oracle's dependency (owlready2) are optional and are not imported here.

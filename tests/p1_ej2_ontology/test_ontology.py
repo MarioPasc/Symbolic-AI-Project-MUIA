@@ -97,8 +97,8 @@ def test_rules_are_o1_to_o6_and_the_clauses_of_every_definition(
     real_ontology: Ontology,
 ) -> None:
     tags = Counter(rule.tag for rule in tagged_rules(real_ontology))
-    # O7: 3 clauses for each of the 12 defined categories of §4.5, 2 + 1 for serotonergic_opioids.
-    assert tags == {"O1": 1, "O2": 1, "O3": 3, "O4": 1, "O5": 1, "O6": 1, "O7": 36 + 3}
+    # O6: 3 clauses for each of the 12 defined categories of §4.5, 2 + 1 for serotonergic_opioids.
+    assert tags == {"O1": 1, "O2": 1, "O3": 3, "O4": 2, "O5": 1, "O6": 36 + 3}
 
 
 @pytest.mark.integration

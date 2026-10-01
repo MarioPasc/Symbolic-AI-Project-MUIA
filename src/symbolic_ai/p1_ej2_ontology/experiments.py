@@ -804,7 +804,7 @@ def run_fixed_point_cost(reasoned: ReasonedOntology) -> FixedPointResult:
     arity and n the number of constants of the KB (facts and rules). The naive loop (Fig. 9.3) is
     run once more to check that it adds the same facts at every iteration, and the ⊂ facts of
     Cl(KB) are compared with the transitive closure of the told subcategory links computed by
-    networkx (a definition yields memberships through O7, never ``Subset`` facts).
+    networkx (a definition yields memberships through O6, never ``Subset`` facts).
     """
     closure, kb = reasoned.closure, reasoned.kb
     atoms = [*closure.facts, *(a for rule in kb.rules for a in _rule_atoms(rule))]
@@ -841,7 +841,7 @@ def _rule_atoms(rule: Expr) -> list[Expr]:
 
 
 def told_knowledge(ontology: Ontology) -> dict[str, object]:
-    """Return the told knowledge (no inference) as JSON-ready data, and the clauses O1-O7.
+    """Return the told knowledge (no inference) as JSON-ready data, and the clauses O1-O6.
 
     It is the ``ontology`` section of ``results.json``, from which Fig. 2 is drawn.
 

@@ -58,7 +58,7 @@ EJ2 writes the formulary's knowledge once per drug *category* (`data/ontology/`,
 taxonomy of 32 drug categories with multiple inheritance, one category defined by its conjuncts,
 the told categories of each drug, and links written on categories, the interactions being
 self-links on three adverse-effect categories), translates it into first-order definite clauses
-(axioms O1-O7, with both directions of every definition), and computes their fixed point by
+(axioms O1-O6, with both directions of every definition), and computes their fixed point by
 forward chaining (AIMA Fig. 9.3 with the incremental rule of §9.3.3, over aima-python's `Expr` and
 unification). Classification, subsumption (by a prototype of each category) and consistency are
 queries on that fixed point, and the drug-level formulary of EJ1 is read off it and compared with
