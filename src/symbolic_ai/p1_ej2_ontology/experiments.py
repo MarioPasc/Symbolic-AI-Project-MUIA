@@ -24,7 +24,13 @@ from aima.utils import Expr
 from symbolic_ai.dataloader.models import Formulary, OntologyData
 from symbolic_ai.p1_ej2_ontology import owl_oracle
 from symbolic_ai.p1_ej2_ontology.forward_chaining import DISTINCT, fc_closure
-from symbolic_ai.p1_ej2_ontology.ontology import FAMILIES_CATEGORY, SUBSET, identifier
+from symbolic_ai.p1_ej2_ontology.ontology import (
+    FAMILIES_CATEGORY,
+    SUBSET,
+    Ontology,
+    identifier,
+    tagged_rules,
+)
 from symbolic_ai.p1_ej2_ontology.reasoner import (
     Clash,
     ReasonedOntology,
@@ -65,6 +71,7 @@ __all__ = [
     "run_formulary_derivation",
     "run_inheritance",
     "run_taxonomy",
+    "told_knowledge",
 ]
 
 #: Mutations of each kind (clash expected / not expected) re-checked by a real HermiT run each.
@@ -778,6 +785,82 @@ def run_fixed_point_cost(reasoned: ReasonedOntology) -> FixedPointResult:
 def _rule_atoms(rule: Expr) -> list[Expr]:
     premises, conclusion = parse_definite_clause(rule)
     return [*premises, conclusion]
+
+
+def told_knowledge(ontology: Ontology) -> dict[str, object]:
+    """Return the told knowledge (no inference) as JSON-ready data, and the clauses O1-O7.
+
+    It is the ``ontology`` section of ``results.json``, from which Fig. 2 is drawn.
+
+    Parameters
+    ----------
+    ontology : Ontology
+        The ontology.
+
+    Returns
+    -------
+    dict[str, object]
+        Categories (with parents, family and drug-category flags), drugs with their leaf,
+        conditions, risk factors, every link table, the disjoint sets, the defined categories and
+        the text of every clause with its axiom tag.
+    """
+    data = ontology.data
+    parents = ontology.parents()
+    leaf = {m.object_id: m.category_id for m in data.memberships}
+    families = set(data.families)
+    return {
+        "categories": [
+            {
+                "id": c.category_id,
+                "name_es": c.name_es,
+                "name_en": c.name_en,
+                "atc_code": c.atc_code,
+                "parents": list(parents.get(c.category_id, ())),
+                "family": c.category_id in families,
+                "drug_category": c.category_id in ontology.drug_categories,
+            }
+            for c in data.categories
+        ],
+        "drugs": [
+            {"id": d.drug_id, "name_es": d.name_es, "leaf": leaf[d.drug_id]} for d in data.drugs
+        ],
+        "conditions": [{"id": c.condition_id, "name_es": c.name_es} for c in data.conditions],
+        "risk_factors": [{"id": r.risk_factor_id, "name_es": r.name_es} for r in data.risk_factors],
+        "indications": [
+            {"subject": i.subject_id, "condition": i.condition_id} for i in data.indications
+        ],
+        "contraindications": [
+            {"subject": c.subject_id, "risk_factor": c.risk_factor_id, "reason": c.reason}
+            for c in data.contraindications
+        ],
+        "interactions": [
+            {
+                "subject_a": i.subject_a,
+                "subject_b": i.subject_b,
+                "effect": i.effect,
+                "severity": i.severity,
+            }
+            for i in data.interactions
+        ],
+        "coprescriptions": [
+            {
+                "subject": c.subject_id,
+                "risk_factor": c.risk_factor_id,
+                "companion": c.companion_drug_id,
+            }
+            for c in data.coprescriptions
+        ],
+        "families": list(data.families),
+        "disjoint_sets": [
+            {"set_id": s.set_id, "categories": list(s.category_ids), "partition_of": s.partition_of}
+            for s in data.disjoint_sets
+        ],
+        "defined_categories": [
+            {"id": d.category_id, "kind": d.kind.value, "target": d.target_id}
+            for d in ontology.defined_categories
+        ],
+        "clauses": [{"axiom": r.tag, "clause": str(r.clause)} for r in tagged_rules(ontology)],
+    }
 
 
 # --- serialisation ------------------------------------------------------------------------------

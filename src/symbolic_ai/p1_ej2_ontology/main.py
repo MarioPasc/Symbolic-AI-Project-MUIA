@@ -36,8 +36,9 @@ from symbolic_ai.p1_ej2_ontology.experiments import (
     run_formulary_derivation,
     run_inheritance,
     run_taxonomy,
+    told_knowledge,
 )
-from symbolic_ai.p1_ej2_ontology.ontology import Ontology, build_ontology, tagged_rules
+from symbolic_ai.p1_ej2_ontology.ontology import Ontology, build_ontology
 from symbolic_ai.p1_ej2_ontology.plot import INFERRED_FIGURE, ONTOLOGY_FIGURE, plot_ontology
 from symbolic_ai.p1_ej2_ontology.reasoner import (
     ReasonedOntology,
@@ -213,67 +214,6 @@ def _provenance(ontology: Ontology, with_oracle: bool) -> dict[str, object]:
     }
 
 
-def _ontology_section(ontology: Ontology) -> dict[str, object]:
-    """Return the told knowledge (no inference), enough to draw Fig. 2, and the clauses."""
-    data = ontology.data
-    parents = ontology.parents()
-    leaf = {m.object_id: m.category_id for m in data.memberships}
-    families = set(data.families)
-    return {
-        "categories": [
-            {
-                "id": c.category_id,
-                "name_es": c.name_es,
-                "name_en": c.name_en,
-                "atc_code": c.atc_code,
-                "parents": list(parents.get(c.category_id, ())),
-                "family": c.category_id in families,
-                "drug_category": c.category_id in ontology.drug_categories,
-            }
-            for c in data.categories
-        ],
-        "drugs": [
-            {"id": d.drug_id, "name_es": d.name_es, "leaf": leaf[d.drug_id]} for d in data.drugs
-        ],
-        "conditions": [{"id": c.condition_id, "name_es": c.name_es} for c in data.conditions],
-        "risk_factors": [{"id": r.risk_factor_id, "name_es": r.name_es} for r in data.risk_factors],
-        "indications": [
-            {"subject": i.subject_id, "condition": i.condition_id} for i in data.indications
-        ],
-        "contraindications": [
-            {"subject": c.subject_id, "risk_factor": c.risk_factor_id, "reason": c.reason}
-            for c in data.contraindications
-        ],
-        "interactions": [
-            {
-                "subject_a": i.subject_a,
-                "subject_b": i.subject_b,
-                "effect": i.effect,
-                "severity": i.severity,
-            }
-            for i in data.interactions
-        ],
-        "coprescriptions": [
-            {
-                "subject": c.subject_id,
-                "risk_factor": c.risk_factor_id,
-                "companion": c.companion_drug_id,
-            }
-            for c in data.coprescriptions
-        ],
-        "families": list(data.families),
-        "disjoint_sets": [
-            {"set_id": s.set_id, "categories": list(s.category_ids), "partition_of": s.partition_of}
-            for s in data.disjoint_sets
-        ],
-        "defined_categories": [
-            {"id": d.category_id, "kind": d.kind.value, "target": d.target_id}
-            for d in ontology.defined_categories
-        ],
-        "clauses": [{"axiom": r.tag, "clause": str(r.clause)} for r in tagged_rules(ontology)],
-    }
-
-
 def _agreement_text(agreement: OracleAgreement | None) -> str:
     if agreement is None:
         return "oracle skipped"
@@ -342,7 +282,7 @@ def _experiment_results(args: argparse.Namespace, ontology: Ontology) -> dict[st
     return {
         "schema": RESULTS_SCHEMA,
         "provenance": _provenance(ontology, with_oracle),
-        "ontology": _ontology_section(ontology),
+        "ontology": told_knowledge(ontology),
         "fixed_point": as_jsonable(cost),
         "formulary_derivation": as_jsonable(p3),
         "taxonomy": as_jsonable(tax),
