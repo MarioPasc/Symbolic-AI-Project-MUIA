@@ -1,8 +1,10 @@
 """Fig. 2: each told fact is an edge of its relation's colour, nodes follow the frozen encoding,
-the layout fits the page, and the files are reproducible."""
+the layout fits the page, and the files are reproducible. Fig. 3: each panel edge has the line
+style of its provenance in the ``taxonomy`` section, and only the panel's nodes are drawn."""
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import struct
@@ -14,10 +16,12 @@ from typing import Any
 import pytest
 
 from symbolic_ai.dataloader import load_formulary
+from symbolic_ai.p1_ej2_ontology import plot
 from symbolic_ai.p1_ej2_ontology.errors import ResultsFormatError
 from symbolic_ai.p1_ej2_ontology.experiments import (
     as_jsonable,
     run_formulary_derivation,
+    run_taxonomy,
     told_knowledge,
 )
 from symbolic_ai.p1_ej2_ontology.ontology import Ontology
@@ -25,11 +29,16 @@ from symbolic_ai.p1_ej2_ontology.plot import (
     CATEGORY_ORDER,
     INFERRED_MEMBER_COLOUR,
     RELATION_COLOURS,
+    TAXONOMY_PANELS,
     Relation,
+    TaxonomyPanel,
     build_ontology_graph,
+    build_taxonomy_graph,
     condition_node,
     plot_ontology,
+    plot_taxonomy_diff,
     risk_factor_node,
+    taxonomy_figure_stem,
 )
 from symbolic_ai.p1_ej2_ontology.reasoner import reason
 from symbolic_ai.viz import TOL
@@ -38,7 +47,8 @@ requires_dot = pytest.mark.skipif(shutil.which("dot") is None, reason="Graphviz 
 
 _EDGE = re.compile(r"^\t(\S+) -> (\S+) \[(.*)\]$")
 _NODE = re.compile(r"^\t(\S+) \[(.*)\]$")
-_ATTRIBUTE = re.compile(r'(\w+)=("(?:[^"\\]|\\.)*"|[^\s\]]+)')
+#: An attribute value: an HTML-like label (``<<...>>``, Fig. 3), a quoted string or a bare word.
+_ATTRIBUTE = re.compile(r'(\w+)=(<<.*?>>|"(?:[^"\\]|\\.)*"|[^\s\]]+)')
 #: Figure limits of the results design §12.2: full IEEE text width, at most 5 in tall.
 _MAX_WIDTH_IN, _MAX_HEIGHT_IN, _PNG_DPI = 7.16, 5.0, 300
 
@@ -373,3 +383,175 @@ def test_malformed_record_raises(results: Mapping[str, object]) -> None:
     broken = {**results, "ontology": {**ontology, "drugs": [{"id": 3}]}}
     with pytest.raises(ResultsFormatError):
         build_ontology_graph(broken, inferred=False)
+
+
+# --- Fig. 3: the deduced taxonomy -------------------------------------------------------------
+
+#: One IEEE column, and both panels together at most 2.6 in tall (panel (b) about 1 in).
+_COLUMN_WIDTH_IN, _PANELS_HEIGHT_IN, _PANEL_B_MAX_HEIGHT_IN = 3.45, 2.6, 1.1
+_SUBSET, _MEMBER = RELATION_COLOURS[Relation.SUBSET], RELATION_COLOURS[Relation.MEMBER]
+
+
+@pytest.fixture(scope="module")
+def full_results(real_ontology: Ontology, results: Mapping[str, object]) -> Mapping[str, Any]:
+    """The sections Fig. 3 reads, through a JSON round trip as in ``results.json``."""
+    tax = run_taxonomy(reason(real_ontology), oracle_run=None, oracle_prototypes=None)
+    loaded: Mapping[str, Any] = json.loads(json.dumps({**results, "taxonomy": as_jsonable(tax)}))
+    return loaded
+
+
+def _expected_taxonomy_edges(
+    results: Mapping[str, Any], panel: TaxonomyPanel
+) -> dict[_Pair, tuple[str, str]]:
+    """Return (colour, style) of every edge a panel must draw, read from the results directly."""
+    nodes = set(TAXONOMY_PANELS[panel])
+    tax, ontology = results["taxonomy"], results["ontology"]
+    expected: dict[_Pair, tuple[str, str]] = {}
+    for e in tax["direct_edges"]:
+        style = "solid" if e["status"] == "told" else "dashed"
+        expected[e["child"], e["parent"]] = (_SUBSET, style)
+    for e in tax["told_edges_made_indirect"]:
+        expected[e["child"], e["parent"]] = (_SUBSET + "73", "dotted")
+    for d in ontology["drugs"]:
+        for c in d["categories"]:
+            if c in tax["most_specific_categories"][d["id"]]:
+                expected[d["id"], c] = (_MEMBER, "solid")
+    for m in tax["new_direct_memberships"]:
+        expected[m["drug"], m["category"]] = (_MEMBER, "dashed")
+    for m in tax["memberships_made_indirect"]:
+        expected[m["child"], m["parent"]] = (_MEMBER + "73", "dotted")
+    return {pair: v for pair, v in expected.items() if set(pair) <= nodes}
+
+
+@pytest.mark.integration
+@requires_dot
+@pytest.mark.parametrize("panel", list(TaxonomyPanel))
+def test_every_panel_edge_has_the_style_of_its_status(
+    full_results: Mapping[str, Any], panel: TaxonomyPanel
+) -> None:
+    source = build_taxonomy_graph(full_results, panel).source
+    drawn = {(t, h): (a["color"], a["style"]) for t, h, a in _edges(source)}
+    assert len(drawn) == len(_edges(source))
+    assert drawn == _expected_taxonomy_edges(full_results, panel)
+
+
+@pytest.mark.integration
+@requires_dot
+@pytest.mark.parametrize(
+    ("panel", "counts"),
+    [
+        # (solid, dashed, dotted) per panel
+        (TaxonomyPanel.A, (5, 6, 1)),
+        (TaxonomyPanel.B, (0, 4, 2)),
+    ],
+)
+def test_panel_edge_counts(
+    full_results: Mapping[str, Any], panel: TaxonomyPanel, counts: tuple[int, int, int]
+) -> None:
+    styles = [a["style"] for _, _, a in _edges(build_taxonomy_graph(full_results, panel).source)]
+    assert (styles.count("solid"), styles.count("dashed"), styles.count("dotted")) == counts
+
+
+@pytest.mark.integration
+@requires_dot
+@pytest.mark.parametrize("panel", list(TaxonomyPanel))
+def test_panels_draw_only_their_own_nodes(
+    full_results: Mapping[str, Any], panel: TaxonomyPanel
+) -> None:
+    source = build_taxonomy_graph(full_results, panel).source
+    allowed = set(TAXONOMY_PANELS[panel])
+    assert set(_nodes(source)) == allowed
+    for tail, head, _ in _edges(source):
+        assert {tail, head} <= allowed
+
+
+@pytest.mark.integration
+@requires_dot
+def test_hbpm_has_no_edge_to_the_pregnancy_contraindication(
+    full_results: Mapping[str, Any],
+) -> None:
+    pairs = {tuple(p) for p in full_results["taxonomy"]["pairs"]}
+    assert ("low_molecular_weight_heparins", "contraindicated_PREG") not in pairs
+    edges = _edges(build_taxonomy_graph(full_results, TaxonomyPanel.A).source)
+    assert ("vitamin_k_antagonists", "contraindicated_PREG") in {(t, h) for t, h, _ in edges}
+    assert [(t, h) for t, h, _ in edges if t == "low_molecular_weight_heparins"] == [
+        ("low_molecular_weight_heparins", "anticoagulants")
+    ]
+
+
+@pytest.mark.integration
+@requires_dot
+def test_panel_nodes_follow_the_encoding_of_fig_2(full_results: Mapping[str, Any]) -> None:
+    nodes = {
+        **_nodes(build_taxonomy_graph(full_results, TaxonomyPanel.A).source),
+        **_nodes(build_taxonomy_graph(full_results, TaxonomyPanel.B).source),
+    }
+    grey = RELATION_COLOURS[Relation.DEFINITION]
+    assert nodes["contraindicated_PREG"]["label"] == (
+        '<<i>Contraind</i><font point-size="9"><sub>EMB</sub></font>>'
+    )
+    assert nodes["candidate_AF"]["label"] == (
+        '<<i>Candidato</i><font point-size="9"><sub>FA</sub></font>>'
+    )
+    assert nodes["serotonergic_opioids"]["label"] == "Opioides serotoninérgicos"
+    assert nodes["low_molecular_weight_heparins"]["label"] == "HBPM"
+    for defined in ("candidate_AF", "contraindicated_PREG", "contraindicated_EPI"):
+        assert nodes[defined]["color"] == grey
+    assert nodes["serotonergic_opioids"]["color"] == grey
+    for primitive in ("drugs", "anticoagulants", "opioids"):
+        assert "color" not in nodes[primitive]
+        assert (nodes[primitive]["shape"], nodes[primitive]["style"]) == ("box", "rounded,filled")
+    assert (nodes["tramadol"]["shape"], nodes["tramadol"]["label"]) == ("ellipse", "Tramadol")
+
+
+@pytest.mark.integration
+@requires_dot
+def test_panels_fit_one_column_and_2_6_inches(
+    full_results: Mapping[str, Any], tmp_path: Path
+) -> None:
+    sizes = {}
+    for panel in TaxonomyPanel:
+        _, _, png = plot_taxonomy_diff(full_results, tmp_path / panel.value, panel=panel)
+        width, height = struct.unpack(">II", png.read_bytes()[16:24])
+        sizes[panel] = (width / _PNG_DPI, height / _PNG_DPI)
+    assert all(width <= _COLUMN_WIDTH_IN for width, _ in sizes.values())
+    assert sum(height for _, height in sizes.values()) <= _PANELS_HEIGHT_IN
+    assert sizes[TaxonomyPanel.B][1] <= _PANEL_B_MAX_HEIGHT_IN
+
+
+@pytest.mark.integration
+@requires_dot
+def test_panel_pdf_embeds_times_new_roman_only(
+    full_results: Mapping[str, Any], tmp_path: Path
+) -> None:
+    _, pdf, _ = plot_taxonomy_diff(full_results, tmp_path / "a", panel=TaxonomyPanel.A)
+    fonts = set(re.findall(rb"/BaseFont /(?:[A-Z]{6}\+)?([A-Za-z0-9-]+)", pdf.read_bytes()))
+    assert fonts == {b"TimesNewRomanPSMT", b"TimesNewRomanPS-ItalicMT"}
+
+
+@pytest.mark.integration
+@requires_dot
+def test_panels_are_identical_across_two_renderings(
+    full_results: Mapping[str, Any], tmp_path: Path
+) -> None:
+    for panel in TaxonomyPanel:
+        stem = taxonomy_figure_stem(panel)
+        first = plot_taxonomy_diff(full_results, tmp_path / "1" / stem, panel=panel)
+        second = plot_taxonomy_diff(full_results, tmp_path / "2" / stem, panel=panel)
+        assert [p.name for p in first] == [f"{stem}.dot", f"{stem}.pdf", f"{stem}.png"]
+        for a, b in zip(first, second, strict=True):
+            assert a.read_bytes() == b.read_bytes()
+
+
+def test_panel_without_the_taxonomy_section_raises(toy_ontology: Ontology) -> None:
+    with pytest.raises(ResultsFormatError, match="taxonomy"):
+        build_taxonomy_graph({"ontology": told_knowledge(toy_ontology)}, TaxonomyPanel.B)
+
+
+@pytest.mark.integration
+def test_panel_with_an_unknown_node_raises(
+    full_results: Mapping[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(plot, "TAXONOMY_PANELS", {TaxonomyPanel.B: ("opioids", "no_such_id")})
+    with pytest.raises(ResultsFormatError, match="no_such_id"):
+        build_taxonomy_graph(full_results, TaxonomyPanel.B)

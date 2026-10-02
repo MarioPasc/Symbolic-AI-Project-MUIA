@@ -15,6 +15,11 @@ taxonomy, then the risk factors, then the drugs), in the top-to-bottom order of
 :data:`CATEGORY_ORDER`, from the edges that shape the hierarchy; ``neato -n2`` then keeps those
 positions and routes every edge around the nodes. ``dot`` alone cannot draw the long
 non-hierarchical edges (families, definitions) without moving them round the ends of the columns.
+
+Fig. 3 (:func:`plot_taxonomy_diff`) draws two excerpts of the deduced taxonomy (the ``taxonomy``
+section) in one drawing each: colour is the relation, as in Fig. 2, and the line style its
+provenance (:class:`Provenance`). Only the node set of each panel (:data:`TAXONOMY_PANELS`) is
+fixed here; every edge comes from the results file.
 """
 
 from __future__ import annotations
@@ -41,12 +46,20 @@ __all__ = [
     "INFERRED_FIGURE",
     "INFERRED_MEMBER_COLOUR",
     "ONTOLOGY_FIGURE",
+    "PROVENANCE_STYLES",
     "RELATION_COLOURS",
+    "TAXONOMY_FIGURE",
+    "TAXONOMY_PANELS",
+    "Provenance",
     "Relation",
+    "TaxonomyPanel",
     "build_ontology_graph",
+    "build_taxonomy_graph",
     "condition_node",
     "plot_ontology",
+    "plot_taxonomy_diff",
     "risk_factor_node",
+    "taxonomy_figure_stem",
 ]
 
 logger = logging.getLogger(__name__)
@@ -54,6 +67,8 @@ logger = logging.getLogger(__name__)
 #: File stems of the two variants inside the output directory.
 ONTOLOGY_FIGURE = "fig_ej2_ontology"
 INFERRED_FIGURE = "fig_ej2_ontology_inferred"
+#: File stem of Fig. 3; each panel appends ``_a`` or ``_b``.
+TAXONOMY_FIGURE = "fig_ej2_taxonomy"
 
 
 class Relation(StrEnum):
@@ -753,4 +768,251 @@ def plot_ontology(
             graph.source.replace("{", f"{{\n\tdpi={_PNG_DPI}", 1), engine="neato"
         )
         png_source.render(outfile=png_path, format="png", cleanup=True, neato_no_op=2)
+    return dot_path, pdf_path, png_path
+
+
+# --- Fig. 3: the deduced taxonomy, as two diff panels -------------------------------------------
+
+
+class TaxonomyPanel(StrEnum):
+    """The two panels of Fig. 3."""
+
+    A = "a"
+    B = "b"
+
+
+#: Node set of each panel (presentation only; the edges come from ``results.json``). Panel (a):
+#: anticoagulants and pregnancy, where reasoning adds a second classification criterion and HBPM
+#: stays outside *Contraind*_EMB; panel (b): the serotonergic opioids and tramadol.
+TAXONOMY_PANELS: Mapping[TaxonomyPanel, tuple[str, ...]] = MappingProxyType(
+    {
+        TaxonomyPanel.A: (
+            "drugs",
+            "candidate_AF",
+            "bleeding_risk_drugs",
+            "contraindicated_PREG",
+            "anticoagulants",
+            "vitamin_k_antagonists",
+            "direct_oral_anticoagulants",
+            "low_molecular_weight_heparins",
+            "raas_blockers",
+        ),
+        TaxonomyPanel.B: (
+            "opioids",
+            "serotonergic_drugs",
+            "serotonergic_opioids",
+            "contraindicated_EPI",
+            "tramadol",
+        ),
+    }
+)
+
+
+class Provenance(StrEnum):
+    """Where an edge of Fig. 3 comes from, drawn as its line style."""
+
+    TOLD = "told"  # told and still direct after reasoning
+    DEDUCED = "deduced"  # direct, and not told
+    MADE_INDIRECT = "made_indirect"  # told, but no longer direct
+
+
+#: Line style of each provenance; a link made indirect is also drawn faded (:data:`_FADED_ALPHA`).
+PROVENANCE_STYLES: Mapping[Provenance, str] = MappingProxyType(
+    {Provenance.TOLD: "solid", Provenance.DEDUCED: "dashed", Provenance.MADE_INDIRECT: "dotted"}
+)
+
+#: Opacity of a link made indirect: alpha 0x73 = 45 % of the relation colour.
+_FADED_ALPHA = "73"
+#: Italic stem of the label of each kind of formulary defined category.
+_DEFINED_STEMS: Mapping[str, str] = {"candidate": "Candidato", "contraindicated": "Contraind"}
+#: Point size requested for a subscript: Graphviz rounds it down to an integer and Pango draws a
+#: subscript at 5/6 of it, so 9 gives 7.5 pt (8 would give 6.7 pt, below the 7 pt minimum).
+_SUBSCRIPT_PT = 9
+#: Graphviz sizes an HTML label without the subscript's drop below the baseline; this margin
+#: (in, horizontal and vertical) keeps the subscript inside the box. Every box of Fig. 3 takes it,
+#: so that the boxes of one rank have the same height.
+_BOX_MARGIN = "0.04,0.03"
+_TAXONOMY_NODESEP_IN = "0.10"
+_TAXONOMY_RANKSEP_IN = "0.22"
+
+
+@dataclass(frozen=True, slots=True)
+class _TaxonomyEdge:
+    """One edge of a Fig. 3 panel."""
+
+    relation: Relation
+    tail: str
+    head: str
+    provenance: Provenance
+
+
+def taxonomy_figure_stem(panel: TaxonomyPanel) -> str:
+    """Return the file stem of a Fig. 3 panel (``fig_ej2_taxonomy_a`` or ``_b``)."""
+    return f"{TAXONOMY_FIGURE}_{panel.value}"
+
+
+def _pairs(section: Mapping[str, object], key: str, tail: str, head: str) -> set[tuple[str, str]]:
+    return {(_text(r, tail), _text(r, head)) for r in _records(section, key)}
+
+
+def _taxonomy_edges(
+    ontology: Mapping[str, object], deduced: Mapping[str, object], panel_nodes: set[str]
+) -> list[_TaxonomyEdge]:
+    """Return the edges among a panel's nodes, from the ``taxonomy`` section, in a fixed order.
+
+    ⊂ edges: the direct edges (told or deduced) and the told links made indirect. ∈ edges: the
+    most specific memberships (told, or new) and the told memberships made indirect.
+    """
+    edges = [
+        _TaxonomyEdge(
+            Relation.SUBSET,
+            _text(r, "child"),
+            _text(r, "parent"),
+            Provenance.TOLD if _text(r, "status") == "told" else Provenance.DEDUCED,
+        )
+        for r in _records(deduced, "direct_edges")
+    ]
+    edges += [
+        _TaxonomyEdge(Relation.SUBSET, c, p, Provenance.MADE_INDIRECT)
+        for c, p in sorted(_pairs(deduced, "told_edges_made_indirect", "child", "parent"))
+    ]
+    most_specific = _section(deduced, "most_specific_categories")
+    edges += [
+        _TaxonomyEdge(Relation.MEMBER, _text(d, "id"), c, Provenance.TOLD)
+        for d in _records(ontology, "drugs")
+        for c in _texts(d, "categories")
+        if c in _texts(most_specific, _text(d, "id"))
+    ]
+    edges += [
+        _TaxonomyEdge(Relation.MEMBER, d, c, Provenance.DEDUCED)
+        for d, c in sorted(_pairs(deduced, "new_direct_memberships", "drug", "category"))
+    ]
+    edges += [
+        _TaxonomyEdge(Relation.MEMBER, d, c, Provenance.MADE_INDIRECT)
+        for d, c in sorted(_pairs(deduced, "memberships_made_indirect", "child", "parent"))
+    ]
+    return [e for e in edges if e.tail in panel_nodes and e.head in panel_nodes]
+
+
+def _defined_label(record: Mapping[str, object]) -> str:
+    """Return the HTML-like label of a formulary defined category: *Contraind*_EMB."""
+    stem = _DEFINED_STEMS[_text(record, "kind")]
+    target = _text(record, "target")
+    abbreviation = ABBREVIATIONS.get(target, target)
+    return f'<<i>{stem}</i><font point-size="{_SUBSCRIPT_PT}"><sub>{abbreviation}</sub></font>>'
+
+
+def _taxonomy_nodes(
+    knowledge: _Knowledge, ontology: Mapping[str, object], panel_nodes: Sequence[str]
+) -> dict[str, _Attributes]:
+    """Return the attributes of a panel's nodes, with Fig. 2's shapes and border colours.
+
+    Raises
+    ------
+    ResultsFormatError
+        If a node of the panel is neither a category, a defined category nor a drug.
+    """
+    defined = {_text(r, "id"): r for r in _records(ontology, "defined_categories")}
+    drugs = _drug_attributes(knowledge) if any(n in knowledge.drugs for n in panel_nodes) else {}
+    nodes: dict[str, _Attributes] = {}
+    for node_id in panel_nodes:
+        if node_id in knowledge.categories:
+            nodes[node_id] = {**_category_attributes(knowledge, node_id), "margin": _BOX_MARGIN}
+        elif node_id in defined:
+            nodes[node_id] = {
+                "label": _defined_label(defined[node_id]),
+                "shape": "box",
+                "style": "rounded,filled",
+                "color": RELATION_COLOURS[Relation.DEFINITION],
+                "margin": _BOX_MARGIN,
+            }
+        elif node_id in drugs:
+            nodes[node_id] = drugs[node_id]
+        else:
+            raise ResultsFormatError(f"panel node {node_id!r} is not in the results file")
+    return nodes
+
+
+def _taxonomy_edge_attributes(edge: _TaxonomyEdge) -> _Attributes:
+    colour = RELATION_COLOURS[edge.relation]
+    attributes = {"style": PROVENANCE_STYLES[edge.provenance]}
+    if edge.provenance is Provenance.MADE_INDIRECT:
+        # dot aims every edge at the centre of its head, so a link made indirect, which runs
+        # beside the direct path, would end on the arrowhead of a direct edge into the same
+        # node (Fármacos in panel (a)); entering from straight below keeps the two apart.
+        colour += _FADED_ALPHA
+        attributes["headport"] = "s"
+    return {"color": colour, **attributes}
+
+
+def build_taxonomy_graph(results: Mapping[str, object], panel: TaxonomyPanel) -> graphviz.Digraph:
+    """Build the Graphviz source of one panel of Fig. 3 from ``results.json``.
+
+    Parameters
+    ----------
+    results : Mapping[str, object]
+        The content of ``results.json``; its ``ontology`` section and the deduced-taxonomy fields
+        of its ``taxonomy`` section are read.
+    panel : TaxonomyPanel
+        The panel, whose nodes are :data:`TAXONOMY_PANELS` ``[panel]``.
+
+    Returns
+    -------
+    graphviz.Digraph
+        The panel, laid out by ``dot`` bottom to top (children below parents); its ``source`` is
+        deterministic.
+
+    Raises
+    ------
+    ResultsFormatError
+        If a section or field is missing, or a node of the panel is unknown.
+    """
+    ontology = _section(results, "ontology")
+    deduced = _section(results, "taxonomy")
+    knowledge = _Knowledge.from_section(ontology)
+    panel_nodes = TAXONOMY_PANELS[panel]
+    nodes = _taxonomy_nodes(knowledge, ontology, panel_nodes)
+    graph = graphviz.Digraph(name=taxonomy_figure_stem(panel))
+    graph.attr(rankdir="BT", nodesep=_TAXONOMY_NODESEP_IN, ranksep=_TAXONOMY_RANKSEP_IN)
+    _common_attributes(graph)
+    for node_id in panel_nodes:
+        graph.node(node_id, **nodes[node_id])
+    for edge in _taxonomy_edges(ontology, deduced, set(panel_nodes)):
+        graph.edge(edge.tail, edge.head, **_taxonomy_edge_attributes(edge))
+    return graph
+
+
+def plot_taxonomy_diff(
+    results: Mapping[str, object], out_stem: Path, *, panel: TaxonomyPanel
+) -> tuple[Path, ...]:
+    """Draw one panel of Fig. 3 (the deduced taxonomy against the told one) as .dot/.pdf/.png.
+
+    Parameters
+    ----------
+    results : Mapping[str, object]
+        The content of ``results.json``.
+    out_stem : Path
+        Output path without extension; parent directories are created.
+    panel : TaxonomyPanel
+        The panel to draw.
+
+    Returns
+    -------
+    tuple[Path, ...]
+        The ``.dot``, ``.pdf`` and ``.png`` files written.
+
+    Raises
+    ------
+    ResultsFormatError
+        If a section or field the figure needs is missing.
+    """
+    graph = build_taxonomy_graph(results, panel)
+    out_stem.parent.mkdir(parents=True, exist_ok=True)
+    dot_path = out_stem.with_suffix(".dot")
+    dot_path.write_text(graph.source, encoding="utf-8")
+    pdf_path, png_path = out_stem.with_suffix(".pdf"), out_stem.with_suffix(".png")
+    with _source_date_epoch():
+        graphviz.render("dot", "pdf", dot_path, outfile=pdf_path)
+        png_source = graphviz.Source(graph.source.replace("{", f"{{\n\tdpi={_PNG_DPI}", 1))
+        png_source.render(outfile=png_path, format="png", cleanup=True)
     return dot_path, pdf_path, png_path
