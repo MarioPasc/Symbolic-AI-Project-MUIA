@@ -23,6 +23,7 @@ from aima.logic import is_variable, parse_definite_clause
 from aima.utils import Expr
 from symbolic_ai.dataloader.models import Formulary, OntologyData
 from symbolic_ai.p1_ej2_ontology import owl_oracle
+from symbolic_ai.p1_ej2_ontology.errors import CyclicTaxonomyError
 from symbolic_ai.p1_ej2_ontology.forward_chaining import DISTINCT, fc_closure
 from symbolic_ai.p1_ej2_ontology.ontology import (
     SUBSET,
@@ -32,7 +33,11 @@ from symbolic_ai.p1_ej2_ontology.ontology import (
 )
 from symbolic_ai.p1_ej2_ontology.reasoner import (
     Clash,
+    DirectEdge,
+    DrugMembership,
+    IndirectLink,
     ReasonedOntology,
+    SameMembers,
     Source,
     add_membership,
     candidate_sources,
@@ -40,6 +45,7 @@ from symbolic_ai.p1_ej2_ontology.reasoner import (
     classify,
     contraindication_sources,
     coprescription_sources,
+    deduced_taxonomy,
     derive_formulary,
     drug_members,
     family_pairs,
@@ -48,6 +54,7 @@ from symbolic_ai.p1_ej2_ontology.reasoner import (
     interaction_sources,
     partition_coverage,
     taxonomy,
+    transitive_reduction,
 )
 
 __all__ = [
@@ -152,7 +159,10 @@ class TaxonomyResult:
     """P4.1: subsumption among the named categories (proper pairs, reflexive ones excluded).
 
     The defined categories are the 12 of ``README.md`` §4.5 and the ones defined by conjuncts
-    (``defined_by_conjuncts``); every other drug category is primitive.
+    (``defined_by_conjuncts``); every other drug category is primitive. The fields from
+    ``direct_edges`` on are the deduced taxonomy (:class:`~.reasoner.DeducedTaxonomy`, Fig. 3);
+    ``oracle_direct_edges_agree`` says whether the transitive reduction of HermiT's classified
+    hierarchy has the same edges (``None`` without the oracle).
     """
 
     n_primitive: int
@@ -168,6 +178,16 @@ class TaxonomyResult:
     pairs: tuple[tuple[str, str], ...]
     oracle_classification: OracleAgreement | None
     oracle_prototypes: OracleAgreement | None
+    direct_edges: tuple[DirectEdge, ...]
+    told_edges_made_indirect: tuple[IndirectLink, ...]
+    redundant_told_edges: tuple[IndirectLink, ...]
+    equivalences: tuple[tuple[str, str], ...]
+    members: Mapping[str, tuple[str, ...]]
+    same_members_not_equivalent: tuple[SameMembers, ...]
+    most_specific_categories: Mapping[str, tuple[str, ...]]
+    memberships_made_indirect: tuple[IndirectLink, ...]
+    new_direct_memberships: tuple[DrugMembership, ...]
+    oracle_direct_edges_agree: bool | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -530,11 +550,18 @@ def run_taxonomy(
     Returns
     -------
     TaxonomyResult
-        Pair counts by kind, the pairs, and HermiT's agreement on every cell of the named x named
-        matrix. A category defined by conjuncts counts as defined, not primitive.
+        Pair counts by kind, the pairs, HermiT's agreement on every cell of the named x named
+        matrix, and the deduced taxonomy (direct edges, told links made indirect, members, most
+        specific categories). A category defined by conjuncts counts as defined, not primitive.
+
+    Raises
+    ------
+    CyclicTaxonomyError
+        If forward chaining finds two named categories equivalent (no unique direct edges).
     """
     ontology = reasoned.ontology
     result = taxonomy(reasoned)
+    deduced = deduced_taxonomy(reasoned, result)
     primitive = set(ontology.primitive_categories)
     defined = set(ontology.defined_ids) | set(ontology.conjunctive_ids)
     pairs = result.pairs()
@@ -545,9 +572,11 @@ def run_taxonomy(
     named = list(ontology.named_categories)
     cells = len(named) * len(named)
     oracle_classification = oracle_by_prototypes = None
+    oracle_direct_agree = None
     if oracle_run is not None:
         hermit = {(c, d) for c in named for d in oracle_run.subsumers[c] if d in set(named)}
         oracle_classification = _agreement(cells, pairs, hermit, "subsumption")
+        oracle_direct_agree = _same_direct_edges(named, hermit, deduced.direct_edges)
     if oracle_prototypes is not None:
         by_prototype = {
             (c, d)
@@ -572,7 +601,31 @@ def run_taxonomy(
         pairs=pairs,
         oracle_classification=oracle_classification,
         oracle_prototypes=oracle_by_prototypes,
+        direct_edges=deduced.direct_edges,
+        told_edges_made_indirect=deduced.told_edges_made_indirect,
+        redundant_told_edges=deduced.redundant_told_edges,
+        equivalences=deduced.equivalences,
+        members=deduced.members,
+        same_members_not_equivalent=deduced.same_members_not_equivalent,
+        most_specific_categories=deduced.most_specific_categories,
+        memberships_made_indirect=deduced.memberships_made_indirect,
+        new_direct_memberships=deduced.new_direct_memberships,
+        oracle_direct_edges_agree=oracle_direct_agree,
     )
+
+
+def _same_direct_edges(
+    named: Sequence[str], hermit_pairs: Iterable[tuple[str, str]], fc_edges: Sequence[DirectEdge]
+) -> bool:
+    """Whether the transitive reduction of HermiT's hierarchy equals forward chaining's edges.
+
+    A cycle in HermiT's pairs (two equivalent classes) has no unique reduction: it disagrees.
+    """
+    try:
+        hermit_direct = transitive_reduction(named, hermit_pairs)
+    except CyclicTaxonomyError:
+        return False
+    return hermit_direct == {(e.child, e.parent) for e in fc_edges}
 
 
 # --- P4.2: inheritance --------------------------------------------------------------------------

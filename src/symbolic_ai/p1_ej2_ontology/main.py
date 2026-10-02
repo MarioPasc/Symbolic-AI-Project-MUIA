@@ -3,8 +3,9 @@
 The only module of this exercise that prints or writes files. It reads the ontology and the
 reference formulary through :mod:`symbolic_ai.dataloader` and has five modes: classify one drug
 (``--classify``), print the taxonomy (``--taxonomy``) or the derived formulary against 1.0.0
-(``--formulary``), run the experiments of the report and save them with both figures
-(``--experiments``), or redraw the figures from a saved results file (``--plot``).
+(``--formulary``), run the experiments of the report and save them with the figures
+(``--experiments``: Fig. 2, its inferred variant and the two panels of Fig. 3), or redraw the
+figures from a saved results file (``--plot``).
 """
 
 from __future__ import annotations
@@ -39,7 +40,14 @@ from symbolic_ai.p1_ej2_ontology.experiments import (
     told_knowledge,
 )
 from symbolic_ai.p1_ej2_ontology.ontology import Ontology, build_ontology
-from symbolic_ai.p1_ej2_ontology.plot import INFERRED_FIGURE, ONTOLOGY_FIGURE, plot_ontology
+from symbolic_ai.p1_ej2_ontology.plot import (
+    INFERRED_FIGURE,
+    ONTOLOGY_FIGURE,
+    TaxonomyPanel,
+    plot_ontology,
+    plot_taxonomy_diff,
+    taxonomy_figure_stem,
+)
 from symbolic_ai.p1_ej2_ontology.reasoner import (
     ReasonedOntology,
     classify,
@@ -89,7 +97,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     mode.add_argument(
         "--experiments",
         action="store_true",
-        help="Run P3 and P4, write results.json and both figures to --out-dir.",
+        help="Run P3 and P4, write results.json and the figures to --out-dir.",
     )
     mode.add_argument(
         "--plot",
@@ -304,10 +312,14 @@ def _load_results(path: Path) -> Mapping[str, object]:
 
 
 def _draw_figures(results_path: Path, out_dir: Path) -> None:
-    """Draw both variants of Fig. 2 from the saved results file and print the paths written."""
+    """Draw both variants of Fig. 2 and both panels of Fig. 3 from the saved results file."""
     results = _load_results(results_path)
     for stem, inferred in ((ONTOLOGY_FIGURE, False), (INFERRED_FIGURE, True)):
         for path in plot_ontology(results, out_dir / stem, inferred=inferred):
+            print(f"wrote {path}")
+    for panel in TaxonomyPanel:
+        stem = taxonomy_figure_stem(panel)
+        for path in plot_taxonomy_diff(results, out_dir / stem, panel=panel):
             print(f"wrote {path}")
 
 
