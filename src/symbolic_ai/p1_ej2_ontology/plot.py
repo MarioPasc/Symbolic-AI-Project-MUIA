@@ -465,8 +465,11 @@ def _label_widths(labels: Mapping[str, str]) -> dict[str, float]:
     }
 
 
-def _drug_attributes(knowledge: _Knowledge) -> dict[str, _Attributes]:
-    """Return the drugs' flat ellipses: fixed height, wider than the measured name by a factor."""
+def _drug_attributes(knowledge: _Knowledge, *, scale: float = 1.0) -> dict[str, _Attributes]:
+    """Return the drugs' flat ellipses: fixed height, wider than the measured name by a factor.
+
+    ``scale`` multiplies both sizes, for a figure laid out larger than it prints (Fig. 3).
+    """
     labels = {d: _text(knowledge.drugs[d], "name_es") for d in sorted(knowledge.drugs)}
     widths = _label_widths(labels)
     return {
@@ -475,8 +478,8 @@ def _drug_attributes(knowledge: _Knowledge) -> dict[str, _Attributes]:
             "shape": "ellipse",
             "style": "filled",
             "fixedsize": "true",
-            "width": f"{_DRUG_WIDTH_FACTOR * widths[drug_id] + _DRUG_WIDTH_PAD_IN:.3f}",
-            "height": f"{_DRUG_HEIGHT_IN:.3f}",
+            "width": f"{scale * (_DRUG_WIDTH_FACTOR * widths[drug_id] + _DRUG_WIDTH_PAD_IN):.3f}",
+            "height": f"{scale * _DRUG_HEIGHT_IN:.3f}",
         }
         for drug_id, label in labels.items()
     }
@@ -825,15 +828,24 @@ PROVENANCE_STYLES: Mapping[Provenance, str] = MappingProxyType(
 _FADED_ALPHA = "73"
 #: Italic stem of the label of each kind of formulary defined category.
 _DEFINED_STEMS: Mapping[str, str] = {"candidate": "Candidato", "contraindicated": "Contraind"}
+#: Fig. 3 is laid out at this multiple of its printed size and printed at the inverse (graph
+#: ``dpi`` = 72 / scale for the PDF). Cairo draws ``dashed`` as 6 on / 6 off and ``dotted`` as
+#: 2 on / 6 off in layout points, whatever the size of the figure; at scale 1 a short edge (one
+#: rank, about 0.25 in) showed one dash and read as solid. At scale 2 the printed pattern is
+#: 3 / 3 pt, and every dashed edge shows at least two gaps.
+_TAXONOMY_SCALE = 2
+#: Every length below is a printed size; :func:`_scaled` turns it into a layout size.
+_TAXONOMY_PDF_DPI = 72 // _TAXONOMY_SCALE
+_TAXONOMY_PNG_DPI = 300 // _TAXONOMY_SCALE
 #: Point size requested for a subscript: Graphviz rounds it down to an integer and Pango draws a
 #: subscript at 5/6 of it, so 9 gives 7.5 pt (8 would give 6.7 pt, below the 7 pt minimum).
 _SUBSCRIPT_PT = 9
 #: Graphviz sizes an HTML label without the subscript's drop below the baseline; this margin
 #: (in, horizontal and vertical) keeps the subscript inside the box. Every box of Fig. 3 takes it,
 #: so that the boxes of one rank have the same height.
-_BOX_MARGIN = "0.04,0.03"
-_TAXONOMY_NODESEP_IN = "0.10"
-_TAXONOMY_RANKSEP_IN = "0.22"
+_BOX_MARGIN_IN = (0.04, 0.03)
+_TAXONOMY_NODESEP_IN = 0.07
+_TAXONOMY_RANKSEP_IN = 0.25
 
 
 @dataclass(frozen=True, slots=True)
@@ -844,6 +856,11 @@ class _TaxonomyEdge:
     tail: str
     head: str
     provenance: Provenance
+
+
+def _scaled(*printed: float) -> str:
+    """Return printed sizes as layout sizes for Fig. 3, comma-separated (Graphviz's syntax)."""
+    return ",".join(f"{_TAXONOMY_SCALE * value:g}" for value in printed)
 
 
 def taxonomy_figure_stem(panel: TaxonomyPanel) -> str:
@@ -899,7 +916,8 @@ def _defined_label(record: Mapping[str, object]) -> str:
     stem = _DEFINED_STEMS[_text(record, "kind")]
     target = _text(record, "target")
     abbreviation = ABBREVIATIONS.get(target, target)
-    return f'<<i>{stem}</i><font point-size="{_SUBSCRIPT_PT}"><sub>{abbreviation}</sub></font>>'
+    size = _TAXONOMY_SCALE * _SUBSCRIPT_PT
+    return f'<<i>{stem}</i><font point-size="{size}"><sub>{abbreviation}</sub></font>>'
 
 
 def _taxonomy_nodes(
@@ -913,18 +931,20 @@ def _taxonomy_nodes(
         If a node of the panel is neither a category, a defined category nor a drug.
     """
     defined = {_text(r, "id"): r for r in _records(ontology, "defined_categories")}
-    drugs = _drug_attributes(knowledge) if any(n in knowledge.drugs for n in panel_nodes) else {}
+    has_drugs = any(n in knowledge.drugs for n in panel_nodes)
+    drugs = _drug_attributes(knowledge, scale=_TAXONOMY_SCALE) if has_drugs else {}
+    margin = _scaled(*_BOX_MARGIN_IN)
     nodes: dict[str, _Attributes] = {}
     for node_id in panel_nodes:
         if node_id in knowledge.categories:
-            nodes[node_id] = {**_category_attributes(knowledge, node_id), "margin": _BOX_MARGIN}
+            nodes[node_id] = {**_category_attributes(knowledge, node_id), "margin": margin}
         elif node_id in defined:
             nodes[node_id] = {
                 "label": _defined_label(defined[node_id]),
                 "shape": "box",
                 "style": "rounded,filled",
                 "color": RELATION_COLOURS[Relation.DEFINITION],
-                "margin": _BOX_MARGIN,
+                "margin": margin,
             }
         elif node_id in drugs:
             nodes[node_id] = drugs[node_id]
@@ -945,6 +965,15 @@ def _taxonomy_edge_attributes(edge: _TaxonomyEdge) -> _Attributes:
     return {"color": colour, **attributes}
 
 
+def _taxonomy_attributes(graph: graphviz.Digraph) -> None:
+    """Set Fig. 2's font, sizes and colours (:func:`_common_attributes`), at the layout scale."""
+    graph.attr(margin="0", pad=_scaled(0.01), fontname=_FONT, outputorder="edgesfirst")
+    graph.attr("node", fontname=_FONT, fontsize=_scaled(_NAME_PT), fontcolor=_INK, color=_INK)
+    graph.attr("node", fillcolor="white", penwidth=_scaled(float(_BORDER_PT)))
+    graph.attr("node", margin=_scaled(0.04, 0.008), height=_scaled(0.05), width=_scaled(0.05))
+    graph.attr("edge", arrowsize=_scaled(float(_ARROW_SIZE)), penwidth=_scaled(float(_EDGE_PT)))
+
+
 def build_taxonomy_graph(results: Mapping[str, object], panel: TaxonomyPanel) -> graphviz.Digraph:
     """Build the Graphviz source of one panel of Fig. 3 from ``results.json``.
 
@@ -959,8 +988,9 @@ def build_taxonomy_graph(results: Mapping[str, object], panel: TaxonomyPanel) ->
     Returns
     -------
     graphviz.Digraph
-        The panel, laid out by ``dot`` bottom to top (children below parents); its ``source`` is
-        deterministic.
+        The panel, laid out by ``dot`` bottom to top (children below parents) at
+        :data:`_TAXONOMY_SCALE` times its printed size, with ``dpi`` set so that the PDF prints at
+        the intended size; its ``source`` is deterministic.
 
     Raises
     ------
@@ -973,8 +1003,9 @@ def build_taxonomy_graph(results: Mapping[str, object], panel: TaxonomyPanel) ->
     panel_nodes = TAXONOMY_PANELS[panel]
     nodes = _taxonomy_nodes(knowledge, ontology, panel_nodes)
     graph = graphviz.Digraph(name=taxonomy_figure_stem(panel))
-    graph.attr(rankdir="BT", nodesep=_TAXONOMY_NODESEP_IN, ranksep=_TAXONOMY_RANKSEP_IN)
-    _common_attributes(graph)
+    graph.attr(rankdir="BT", dpi=str(_TAXONOMY_PDF_DPI))
+    graph.attr(nodesep=_scaled(_TAXONOMY_NODESEP_IN), ranksep=_scaled(_TAXONOMY_RANKSEP_IN))
+    _taxonomy_attributes(graph)
     for node_id in panel_nodes:
         graph.node(node_id, **nodes[node_id])
     for edge in _taxonomy_edges(ontology, deduced, set(panel_nodes)):
@@ -1013,6 +1044,7 @@ def plot_taxonomy_diff(
     pdf_path, png_path = out_stem.with_suffix(".pdf"), out_stem.with_suffix(".png")
     with _source_date_epoch():
         graphviz.render("dot", "pdf", dot_path, outfile=pdf_path)
-        png_source = graphviz.Source(graph.source.replace("{", f"{{\n\tdpi={_PNG_DPI}", 1))
+        png_dpi = f"dpi={_TAXONOMY_PNG_DPI}"
+        png_source = graphviz.Source(graph.source.replace(f"dpi={_TAXONOMY_PDF_DPI}", png_dpi, 1))
         png_source.render(outfile=png_path, format="png", cleanup=True)
     return dot_path, pdf_path, png_path

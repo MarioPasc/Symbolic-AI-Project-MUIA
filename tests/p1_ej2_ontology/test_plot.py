@@ -5,9 +5,11 @@ style of its provenance in the ``taxonomy`` section, and only the panel's nodes 
 from __future__ import annotations
 
 import json
+import math
 import re
 import shutil
 import struct
+import zlib
 from collections.abc import Mapping
 from itertools import combinations
 from pathlib import Path
@@ -488,10 +490,10 @@ def test_panel_nodes_follow_the_encoding_of_fig_2(full_results: Mapping[str, Any
     }
     grey = RELATION_COLOURS[Relation.DEFINITION]
     assert nodes["contraindicated_PREG"]["label"] == (
-        '<<i>Contraind</i><font point-size="9"><sub>EMB</sub></font>>'
+        '<<i>Contraind</i><font point-size="18"><sub>EMB</sub></font>>'
     )
     assert nodes["candidate_AF"]["label"] == (
-        '<<i>Candidato</i><font point-size="9"><sub>FA</sub></font>>'
+        '<<i>Candidato</i><font point-size="18"><sub>FA</sub></font>>'
     )
     assert nodes["serotonergic_opioids"]["label"] == "Opioides serotoninérgicos"
     assert nodes["low_molecular_weight_heparins"]["label"] == "HBPM"
@@ -517,6 +519,69 @@ def test_panels_fit_one_column_and_2_6_inches(
     assert all(width <= _COLUMN_WIDTH_IN for width, _ in sizes.values())
     assert sum(height for _, height in sizes.values()) <= _PANELS_HEIGHT_IN
     assert sizes[TaxonomyPanel.B][1] <= _PANEL_B_MAX_HEIGHT_IN
+
+
+def _spline_length(points: list[list[float]]) -> float:
+    """Length (layout points) of a piecewise cubic Bézier curve, by 40 chords per piece."""
+    length = 0.0
+    for i in range(0, len(points) - 3, 3):
+        p0, p1, p2, p3 = points[i : i + 4]
+        previous = p0
+        for k in range(1, 41):
+            t = k / 40
+            current = [
+                (1 - t) ** 3 * p0[j]
+                + 3 * (1 - t) ** 2 * t * p1[j]
+                + 3 * (1 - t) * t**2 * p2[j]
+                + t**3 * p3[j]
+                for j in (0, 1)
+            ]
+            length += math.dist(previous, current)
+            previous = current
+    return length
+
+
+@pytest.mark.integration
+@requires_dot
+@pytest.mark.parametrize("panel", list(TaxonomyPanel))
+def test_every_dashed_edge_shows_two_gaps(
+    full_results: Mapping[str, Any], panel: TaxonomyPanel
+) -> None:
+    # Cairo dashes 6 on / 6 off from the tail, in layout points: the shaft (to the arrowhead)
+    # shows two gaps once it is longer than dash + gap + dash = 18 points.
+    graph = build_taxonomy_graph(full_results, panel)
+    layout = json.loads(graph.pipe(format="json"))
+    names = {o["_gvid"]: o["name"] for o in layout["objects"]}
+    dashed = [e for e in layout["edges"] if e.get("style") == "dashed"]
+    assert dashed
+    for edge in dashed:
+        shaft = next(op["points"] for op in edge["_draw_"] if op["op"] == "b")
+        assert _spline_length(shaft) > 18.0, (names[edge["tail"]], names[edge["head"]])
+
+
+def _inflate(data: bytes) -> bytes:
+    """Return a PDF stream decompressed, or empty if it is not Flate-encoded."""
+    try:
+        return zlib.decompress(data)
+    except zlib.error:
+        return b""
+
+
+@pytest.mark.integration
+@requires_dot
+def test_panels_are_laid_out_at_twice_their_printed_size(
+    full_results: Mapping[str, Any], tmp_path: Path
+) -> None:
+    source = build_taxonomy_graph(full_results, TaxonomyPanel.B).source
+    assert "dpi=36" in source and "fontsize=16" in source
+    _, pdf, png = plot_taxonomy_diff(full_results, tmp_path / "b", panel=TaxonomyPanel.B)
+    width, height = struct.unpack(">II", png.read_bytes()[16:24])
+    # The PDF page (in a compressed object stream) is the printed size, the PNG its 300 dpi raster.
+    streams = re.findall(rb"stream\r?\n(.*?)endstream", pdf.read_bytes(), re.S)
+    pages = [re.search(rb"/MediaBox \[ 0 0 ([\d.]+) ([\d.]+) \]", _inflate(s)) for s in streams]
+    media = next(m for m in pages if m is not None)
+    assert abs(float(media[1]) - width / _PNG_DPI * 72) < 1.0
+    assert abs(float(media[2]) - height / _PNG_DPI * 72) < 1.0
 
 
 @pytest.mark.integration
