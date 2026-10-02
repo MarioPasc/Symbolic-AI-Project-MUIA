@@ -15,6 +15,8 @@ dependencies:
   # EJ2 ontology figure: Graphviz's `dot` and its Python binding
   - graphviz
   - python-graphviz
+  # Times New Roman for the EJ2 figures (the report's font; the plot tests check that it is embedded)
+  - mscorefonts
   # development
   - pytest
   - pytest-cov
