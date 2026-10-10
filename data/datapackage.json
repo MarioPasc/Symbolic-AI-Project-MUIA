@@ -2,7 +2,7 @@
   "name": "symbolic-ai-course-database",
   "title": "Symbolic AI course database: formulary and patients",
   "profile": "tabular-data-package",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "resources": [
     {
       "name": "conditions",
@@ -160,6 +160,23 @@
         "foreignKeys": [
           { "fields": "drug_id", "reference": { "resource": "drugs", "fields": "drug_id" } },
           { "fields": "class_id", "reference": { "resource": "drug_classes", "fields": "class_id" } }
+        ]
+      }
+    },
+    {
+      "name": "drug_costs",
+      "path": "formulary/drug_costs.csv",
+      "profile": "tabular-data-resource",
+      "schema": {
+        "fields": [
+          { "name": "drug_id", "type": "string", "constraints": { "required": true } },
+          { "name": "monthly_cost_cents", "type": "integer", "constraints": { "required": true, "minimum": 0 } },
+          { "name": "source", "type": "string" },
+          { "name": "since", "type": "string", "constraints": { "required": true } }
+        ],
+        "primaryKey": ["drug_id"],
+        "foreignKeys": [
+          { "fields": "drug_id", "reference": { "resource": "drugs", "fields": "drug_id" } }
         ]
       }
     },

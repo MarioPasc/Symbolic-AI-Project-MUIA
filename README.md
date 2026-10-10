@@ -88,6 +88,45 @@ excepted); with pip, `pip install -e ".[owl]"`. Without Java, run with `--no-ora
 forward-chaining results are the same, the oracle fields of `results.json` are `null`, and the
 oracle tests are skipped.
 
+## Run — EJ3, the cost-aware agent (informed search)
+
+EJ3 keeps the agent of EJ1 and adds a search on top of it. Agent 1 runs unchanged and still decides
+PRESCRIBE / REQUEST_TEST / REFER; when it prescribes, the EJ3 agent searches the regimens of the
+worst-case record Γ⁺ and returns the cheapest one instead of the first model DPLL found. The drug
+costs are a table of their own (`data/formulary/drug_costs.csv`, data 1.2.0: illustrative monthly
+costs in euro cents, not real prices).
+
+- **State**: a partial regimen, a set of drugs that breaks none of A2-A6. **Action**: prescribe one
+  candidate for the first uncovered condition, with the companions A5 requires. **Goal**: every
+  present condition is covered (A1). **Path cost**: the cost of the drugs added.
+- **Heuristic**: for each uncovered condition, the cheapest candidate still compatible with the
+  drugs already prescribed (shared among the conditions a drug treats; infinite when a condition
+  has none left). It is consistent, so A* graph search returns a cheapest regimen.
+- **Algorithms** (`aima.search`, called unchanged): A* by default; IDA*, greedy best-first and
+  uniform-cost search for comparison.
+- **From Agent 1** the search takes the proof that a regimen exists, the essential and excluded
+  drugs (to prune; `--no-prune` skips them) and Agent 1's regimen (an upper bound on the cost).
+  Every regimen is checked against the clauses of Γ⁺ before it is returned.
+
+```bash
+conda activate symai
+
+python -m symbolic_ai.p1_ej3_search.main --encounter E001
+python -m symbolic_ai.p1_ej3_search.main --all
+python -m symbolic_ai.p1_ej3_search.main --all --algorithm greedy    # astar | idastar | greedy | uniform_cost
+python -m symbolic_ai.p1_ej3_search.main --all --no-prune            # without Agent 1's classification
+python -m symbolic_ai.p1_ej3_search.main --all --json outputs/ej3_decisions.json
+python -m symbolic_ai.p1_ej3_search.main --experiments --workers 8   # P6 and P7, about 5 minutes
+```
+
+`--experiments` writes `outputs/ej3/results.json` (schema `symai.ej3.results/1`); the file is
+byte-identical for any `--workers`. P6 decides the five encounters of the database. P7 takes the
+4,032 fully observed records and, on the 2,752 satisfiable ones, runs the four algorithms with and
+without the pruning, checks every cost against the cheapest regimen of the EJ1 oracle
+(`RegimenSpace.regimens`, which the agent never uses) and measures how far Agent 1's own regimen is
+from it. Nearly all of the run time is Agent 1 classifying the drugs of each record (37 SAT calls);
+the searches themselves take seconds.
+
 ## Test
 
 ```bash
@@ -113,7 +152,7 @@ symnbolic_ai_project/
 │       ├── viz/                      shared IEEE figure style for every exercise
 │       ├── p1_ej1_logic/             EJ1: the SAT prescribing agent (this practical's core)
 │       ├── p1_ej2_ontology/          EJ2: ontology, forward chaining, HermiT oracle, figure
-│       └── p1_ej3_search/            EJ3: placeholder
+│       └── p1_ej3_search/            EJ3: the cost-aware agent (A* for the cheapest regimen)
 └── tests/                            mirrors src/symbolic_ai/
 ```
 
@@ -134,6 +173,11 @@ reference for this layout and for `p1_ej1_logic`'s file roles.
   `parse_definite_clause` (same vendored copy); its `fol_fc_ask` is used only as a test reference.
   The forward-chaining loop follows Fig. 9.3 and §9.3.2-9.3.3 of *Artificial Intelligence: A
   Modern Approach*; the ontology follows §10.1-10.2 and §10.5 (4th ed.).
+- EJ3: aima-python's `astar_search`, `iterative_deepening_astar_search`,
+  `best_first_graph_search`, `uniform_cost_search` and `InstrumentedProblem` (same vendored copy),
+  called unchanged. The problem formulation follows §3.1 of *Artificial Intelligence: A Modern
+  Approach* (4th ed.), best-first search Fig. 3.7, greedy search §3.5.1, A* and consistency §3.5.2,
+  IDA* §3.5.5 and heuristics from relaxed problems §3.6.2.
 - **owlready2** 0.51, https://pypi.org/project/owlready2/ (J.-B. Lamy, *Artificial Intelligence in
   Medicine* 80, 2017), LGPL-3.0-or-later, with the bundled **HermiT** 1.3.8 OWL 2 reasoner
   (B. Glimm, I. Horrocks, B. Motik, G. Stoilos, Z. Wang, *J. Automated Reasoning* 53(3), 2014),

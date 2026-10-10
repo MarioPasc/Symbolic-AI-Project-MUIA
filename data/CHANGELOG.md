@@ -3,6 +3,26 @@
 All notable changes to the course database are documented here, one entry per data version
 (semantic versioning: MINOR for additive changes, MAJOR only by explicit team decision).
 
+## 1.2.0 — 2026-10-09
+
+Additive: the drug costs for EJ3 (cost-aware search). No existing file or row changed; EJ1 stays
+pinned to 1.0.0 and `load_formulary(version="1.0.0")` returns exactly what it returned before. Loads
+that take the default version (`load_formulary()`, `load_ontology()`) return the same content,
+labelled 1.2.0.
+
+- **New table `formulary/drug_costs.csv`** (resource `drug_costs`, every row `since = 1.2.0`):
+  `drug_id`, `monthly_cost_cents` (one month of treatment, in euro cents), `source` (left empty, as
+  in the other formulary tables). 18 rows, one per drug.
+- The costs are **illustrative, not real prices**. Long-established generics cost between 1.40 and
+  6.10 euros a month; apixaban (54.00) and linagliptin (38.00) cost an order of magnitude more.
+  Omeprazole (2.70) is priced so that ibuprofen with its companion (5.00) is dearer than tramadol
+  alone (4.80), which makes the coprescription of A5 matter to the cost of a regimen.
+- **Access**: `load_drug_costs(data_dir, version)`, a loader of its own that returns one `DrugCost`
+  per drug; `Formulary` has no new field.
+- **Validation** (`python -m symbolic_ai.dataloader.validate`): no cost is negative. That every
+  drug has a cost is checked by `load_drug_costs`, not by the validation, so that a drug added later
+  without a cost does not invalidate the database for the exercises that read none.
+
 ## 1.1.0 — 2026-10-01, amended 2026-10-01 (R1, R2, R3a)
 
 Additive: the ontology of drug categories for EJ2. No existing file or row changed; EJ1 stays

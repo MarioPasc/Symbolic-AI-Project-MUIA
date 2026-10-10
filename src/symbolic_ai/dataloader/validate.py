@@ -13,6 +13,7 @@ from pathlib import Path
 from symbolic_ai.dataloader import (
     DatabaseValidationError,
     default_data_dir,
+    load_drug_costs,
     load_encounters,
     load_formulary,
     load_ontology,
@@ -60,6 +61,7 @@ def _print_summary(data_dir: Path) -> None:
         f"interactions, {len(ontology.coprescriptions)} coprescriptions, "
         f"{len(ontology.families)} families, {len(ontology.disjoint_sets)} disjoint sets"
     )
+    print(f"drug_costs: {len(load_drug_costs(data_dir))}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -81,6 +83,8 @@ def main(argv: list[str] | None = None) -> int:
         validate_database(data_dir)
         # Loading the ontology also checks that every drug has a told membership.
         load_ontology(data_dir)
+        # Loading the costs also checks that every drug has one.
+        load_drug_costs(data_dir)
     except DatabaseValidationError as exc:
         print(f"FAILED: {len(exc.problems)} database problem(s):")
         for problem in exc.problems:
