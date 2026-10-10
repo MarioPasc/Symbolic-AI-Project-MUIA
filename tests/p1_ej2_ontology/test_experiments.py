@@ -22,6 +22,7 @@ from symbolic_ai.p1_ej2_ontology.experiments import (
     told_knowledge,
 )
 from symbolic_ai.p1_ej2_ontology.ontology import Ontology
+from symbolic_ai.p1_ej2_ontology.owl_oracle import OracleRun
 from symbolic_ai.p1_ej2_ontology.reasoner import ReasonedOntology, reason
 
 pytestmark = pytest.mark.integration
@@ -154,6 +155,59 @@ def test_p4_primitive_to_defined_pairs_per_defined_category(reasoned: ReasonedOn
         "contraindicated_PREG": 5,
         "serotonergic_opioids": 0,
     }
+
+
+def _fake_oracle(subsumers: dict[str, frozenset[str]]) -> OracleRun:
+    """An OracleRun with only a class hierarchy (what the direct-edge comparison reads)."""
+    return OracleRun(consistent=True, individuals={}, subsumers=subsumers, unsatisfiable=())
+
+
+def test_p4_deduced_taxonomy_fields_without_the_oracle(reasoned: ReasonedOntology) -> None:
+    result = run_taxonomy(reasoned, oracle_run=None, oracle_prototypes=None)
+    assert result.oracle_direct_edges_agree is None
+    assert len(result.direct_edges) == 60
+    assert len(result.told_edges_made_indirect) == 6
+    assert len(result.redundant_told_edges) == 1
+    assert result.equivalences == ()
+    assert len(result.same_members_not_equivalent) == 11
+    assert result.most_specific_categories["tramadol"] == ("serotonergic_opioids",)
+    serialised = json.loads(json.dumps(as_jsonable(result)))
+    assert serialised["direct_edges"][0] == {
+        "child": "ace_inhibitors",
+        "parent": "raas_blockers",
+        "status": "told",
+    }
+    assert serialised["new_direct_memberships"] == [
+        {"drug": "tramadol", "category": "serotonergic_opioids"}
+    ]
+
+
+def test_p4_oracle_direct_edges_agree_on_the_same_hierarchy(reasoned: ReasonedOntology) -> None:
+    fc = run_taxonomy(reasoned, oracle_run=None, oracle_prototypes=None)
+    same = {
+        c: frozenset(d for x, d in fc.pairs if x == c) for c in reasoned.ontology.named_categories
+    }
+    result = run_taxonomy(reasoned, oracle_run=_fake_oracle(same), oracle_prototypes=None)
+    assert result.oracle_direct_edges_agree is True
+
+
+@pytest.mark.parametrize(
+    ("change", "label"),
+    [("drop", "a missing pair"), ("cycle", "two equivalent classes")],
+)
+def test_p4_oracle_direct_edges_disagree_on_a_different_hierarchy(
+    reasoned: ReasonedOntology, change: str, label: str
+) -> None:
+    fc = run_taxonomy(reasoned, oracle_run=None, oracle_prototypes=None)
+    named = reasoned.ontology.named_categories
+    subsumers = {c: {d for x, d in fc.pairs if x == c} for c in named}
+    if change == "drop":
+        subsumers["anticoagulants"].discard("candidate_AF")
+    else:
+        subsumers["candidate_AF"].add("anticoagulants")
+    oracle = _fake_oracle({c: frozenset(s) for c, s in subsumers.items()})
+    result = run_taxonomy(reasoned, oracle_run=oracle, oracle_prototypes=None)
+    assert result.oracle_direct_edges_agree is False, label
 
 
 def test_p4_inheritance_range_and_examples(reasoned: ReasonedOntology) -> None:

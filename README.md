@@ -128,8 +128,13 @@ symai-ej2 --experiments
 `--experiments` writes `outputs/ej2/results.json` (schema `symai.ej2.results/1`: provenance, the
 told ontology, the fixed point, P3 `formulary_derivation`, P4 `taxonomy`, `inheritance`,
 `consistency`) and `outputs/ej2/fig_ej2_ontology{,_inferred}.{dot,pdf,png}`, the ontology drawn as
-a semantic network by Graphviz from that file. Two runs give byte-identical files (no timestamps;
-the PDFs are rendered with `SOURCE_DATE_EPOCH=0`).
+a semantic network by Graphviz from that file. The `taxonomy` section also holds the deduced
+taxonomy (`direct_edges` told/deduced, `told_edges_made_indirect`, `redundant_told_edges`,
+`equivalences`, `members`, `same_members_not_equivalent`, `most_specific_categories`,
+`memberships_made_indirect`, `new_direct_memberships`, `oracle_direct_edges_agree`), drawn as the
+two panels of Fig. 3, `outputs/ej2/fig_ej2_taxonomy_{a,b}.{dot,pdf,png}` (line style = told,
+deduced or made indirect). Two runs give byte-identical files (no timestamps; the PDFs are
+rendered with `SOURCE_DATE_EPOCH=0`).
 
 **Optional requirements.** The oracle needs `owlready2` (it bundles HermiT) and a Java runtime
 (≥ 11) on the system; the figures need Graphviz's `dot`. Both come with `environment.yml` (Java
