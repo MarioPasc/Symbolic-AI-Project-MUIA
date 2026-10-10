@@ -56,10 +56,13 @@ from symbolic_ai.p1_ej2_ontology.reasoner import (
     taxonomy,
 )
 
-__all__ = ["REFERENCE_VERSION", "RESULTS_SCHEMA", "build_arg_parser", "main"]
+__all__ = ["EJ2_DATA_VERSION", "REFERENCE_VERSION", "RESULTS_SCHEMA", "build_arg_parser", "main"]
 
 #: Identifier and version of the layout of ``results.json``; bump it when a field changes meaning.
 RESULTS_SCHEMA = "symai.ej2.results/1"
+#: The database version EJ2 reasons over (the ontology tables were added in 1.1.0). Pinned, as EJ1
+#: pins 1.0.0 and EJ3 1.2.0, so that a later additive version does not relabel EJ2's results.
+EJ2_DATA_VERSION = "1.1.0"
 #: The hand-written formulary the derived one is compared with (EJ1 stays pinned to it).
 REFERENCE_VERSION = "1.0.0"
 #: Commit of the vendored aima-python (``src/aima/VENDORED.md``).
@@ -341,7 +344,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.plot is not None:
         _draw_figures(args.plot, args.out_dir)
         return 0
-    ontology = build_ontology(load_ontology(data_dir=args.data_dir))
+    ontology = build_ontology(load_ontology(data_dir=args.data_dir, version=EJ2_DATA_VERSION))
     if args.classify is not None:
         reasoned = reason(ontology)
         try:

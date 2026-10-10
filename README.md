@@ -50,7 +50,7 @@ Files written (`outputs/` is git-ignored):
 | exercise | files |
 |---|---|
 | EJ1 | `outputs/ej1/results.json`, `outputs/ej1/fig_ej1_value_ordering.{pdf,png}` |
-| EJ2 | `outputs/ej2/results.json`, `outputs/ej2/fig_ej2_ontology{,_inferred}.{dot,pdf,png}` |
+| EJ2 | `outputs/ej2/results.json`, `outputs/ej2/fig_ej2_ontology{,_inferred}.{dot,pdf,png}`, `outputs/ej2/fig_ej2_taxonomy_{a,b}.{dot,pdf,png}` |
 | EJ3 | `outputs/ej3/results.json` |
 
 Where each table and figure of the report comes from:
@@ -60,7 +60,7 @@ Where each table and figure of the report comes from:
 | EJ1, Table II (decisions of P1) | `outputs/ej1/results.json` | `scenarios` (Γ⁺/Γ⁻ model counts from the oracle) |
 | EJ1, Fig. 1 (value ordering, P2) | `outputs/ej1/fig_ej1_value_ordering.pdf` | drawn from `value_ordering` |
 | EJ2, Fig. 2 (the ontology as a semantic network) | `outputs/ej2/fig_ej2_ontology.pdf` | drawn from `ontology` and `formulary_derivation.defined_category_members` |
-| EJ2, Fig. 3 (deduced against told taxonomy) | `outputs/ej2/fig_ej2_taxonomy_{a,b}.pdf` (not yet drawn by this version of the code; `--report-figures` reports them missing) | `taxonomy` |
+| EJ2, Fig. 3 (deduced against told taxonomy) | `outputs/ej2/fig_ej2_taxonomy_{a,b}.pdf` | drawn from `taxonomy` |
 | EJ3, Table III (P6 scenarios) | `outputs/ej3/results.json` | `scenarios` |
 | EJ3, Table IV (P7 cost and effort) | `outputs/ej3/results.json` | `search_comparison.configurations` and `search_comparison.baseline` |
 

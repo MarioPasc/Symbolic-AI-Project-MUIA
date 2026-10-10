@@ -299,7 +299,7 @@ def test_derived_formulary_reproduces_1_0_0_plus_three_pairs(
 ) -> None:
     derived = derive_formulary(reasoned)
     reference = load_formulary(version="1.0.0")
-    assert derived.version == "ontology@1.2.0"
+    assert derived.version == "ontology@1.1.0"
     assert derived.candidates == reference.candidates
     contraindications = {(c.risk_factor_id, c.drug_id) for c in derived.contraindications}
     assert contraindications == {(c.risk_factor_id, c.drug_id) for c in reference.contraindications}
