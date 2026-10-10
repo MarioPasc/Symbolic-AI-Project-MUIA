@@ -6,6 +6,9 @@ link subjects resolve to a category or a drug, the two namespaces are disjoint,
 conjuncts, no told parent and no told member, the graph of subcategory and definition edges is
 acyclic, and every disjoint set has at least two members and one consistent ``partition_of``.
 
+Since data 1.2.0 it also checks the drug costs of EJ3: no cost is negative. That every drug has a
+cost is checked when the costs are loaded (:func:`missing_drug_costs`), as for the memberships.
+
 Every check reads the raw (untyped) rows of every resource and returns the problems it finds
 instead of raising, so that :func:`collect_problems` reports every violation of the database in one
 pass, as the specification requires.
@@ -511,6 +514,47 @@ def missing_memberships(drug_ids: Iterable[str], member_ids: Iterable[str]) -> t
     )
 
 
+# --- drug costs (data 1.2.0, EJ3) -------------------------------------------------------------
+
+_DRUG_COSTS = "drug_costs"
+_COST_FIELD = "monthly_cost_cents"
+
+
+def _check_drug_costs(raw: RawTable) -> list[str]:
+    """``drug_costs``: no cost is negative (the search of EJ3 needs non-negative step costs)."""
+    problems: list[str] = []
+    for row in _rows(raw, _DRUG_COSTS):
+        cost = _safe_int(row.get(_COST_FIELD))
+        if cost is not None and cost < 0:
+            problems.append(
+                f"drug_costs[drug_id={row.get('drug_id')!r}]: {_COST_FIELD} = {cost} is negative"
+            )
+    return problems
+
+
+def missing_drug_costs(drug_ids: Iterable[str], costed_ids: Iterable[str]) -> tuple[str, ...]:
+    """Report every drug without a cost, for :func:`symbolic_ai.dataloader.load_drug_costs`.
+
+    Checked when the costs are loaded, not in :func:`collect_problems`, for the reason given in
+    :func:`missing_memberships`: a drug added in a later data version before it is priced must
+    not invalidate the database for the exercises that never read a cost.
+
+    Parameters
+    ----------
+    drug_ids : Iterable[str]
+        The drugs that need a cost.
+    costed_ids : Iterable[str]
+        The drugs that have one.
+
+    Returns
+    -------
+    tuple[str, ...]
+        One problem message per drug with no cost, sorted by drug.
+    """
+    missing = sorted(set(drug_ids) - set(costed_ids))
+    return tuple(f"drug_costs: drug {drug_id!r} has no cost" for drug_id in missing)
+
+
 def _read_all_raw(data_dir: Path, package: DataPackage) -> RawTable:
     return {resource.name: read_raw_rows(data_dir, resource) for resource in package.resources}
 
@@ -551,4 +595,5 @@ def collect_problems(data_dir: Path) -> tuple[str, ...]:
     problems.extend(_check_encounter_risk_factor_completeness(raw))
     problems.extend(_check_age65_and_preg_consistency(raw))
     problems.extend(_check_ontology(raw))
+    problems.extend(_check_drug_costs(raw))
     return tuple(problems)

@@ -5,7 +5,8 @@ module restates the six axioms as the report's prose defines them, directly on a
 drugs), and enumerates every regimen of the formulary. It shares only the formulary data with the
 agent (no clause, no CNF, no solver), so an error in the encoding, in the solver wrapper or in the
 decision rule shows up as a disagreement with it. It is used to check DPLL's verdicts and to measure
-what DPLL cannot give (model counts and minimum regimen sizes).
+what DPLL cannot give (model counts and minimum regimen sizes). EJ3 checks its search against the
+same oracle, through :meth:`RegimenSpace.regimens`.
 """
 
 from __future__ import annotations
@@ -145,6 +146,31 @@ class RegimenSpace:
         if not accepted.any():
             return None
         return int(self._sizes[accepted].min())
+
+    def regimens(self, record: FullRecord) -> tuple[frozenset[str], ...]:
+        """Return every regimen that satisfies A1-A6 for ``record`` (the models of its Γ).
+
+        Parameters
+        ----------
+        record : FullRecord
+            The fully observed record.
+
+        Returns
+        -------
+        tuple[frozenset[str], ...]
+            The accepted regimens as sets of drug identifiers, ordered by size and then by their
+            sorted identifiers; empty when Γ is unsatisfiable.
+
+        Raises
+        ------
+        OracleError
+            If the record names a condition or risk factor outside the formulary.
+        """
+        accepted = self._regimens[self._accepted(record)]
+        listed = [
+            tuple(self._drug_ids[column] for column in np.flatnonzero(row)) for row in accepted
+        ]
+        return tuple(frozenset(drugs) for drugs in sorted(listed, key=lambda d: (len(d), d)))
 
     def violations(self, record: FullRecord, regimen: Iterable[str]) -> tuple[str, ...]:
         """Return the axioms (``"A1"`` ... ``"A6"``) that ``regimen`` violates for ``record``.

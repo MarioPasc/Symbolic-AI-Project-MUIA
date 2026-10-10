@@ -32,6 +32,7 @@ from symbolic_ai.dataloader.models import (
     DisjointSet,
     Drug,
     DrugClass,
+    DrugCost,
     Encounter,
     Formulary,
     IndicationLink,
@@ -58,6 +59,7 @@ __all__ = [
     "DisjointSet",
     "Drug",
     "DrugClass",
+    "DrugCost",
     "Encounter",
     "Formulary",
     "IndicationLink",
@@ -70,6 +72,7 @@ __all__ = [
     "SubcategoryEdge",
     "UnknownIdError",
     "default_data_dir",
+    "load_drug_costs",
     "load_encounter",
     "load_encounters",
     "load_formulary",
@@ -299,6 +302,53 @@ def load_formulary(data_dir: Path | None = None, version: str | None = None) -> 
         drug_classes=_drug_classes(directory, package, target_version),
         class_members=_class_members(directory, package, target_version),
     )
+
+
+def load_drug_costs(
+    data_dir: Path | None = None, version: str | None = None
+) -> Mapping[str, DrugCost]:
+    """Load the cost of every drug as of ``version`` (default: the database version).
+
+    The costs are a table of their own (data 1.2.0), not a field of :class:`Formulary`, so that
+    ``load_formulary`` returns exactly what it returned before for every version.
+
+    Parameters
+    ----------
+    data_dir : Path | None
+        Database directory (default: :func:`default_data_dir`).
+    version : str | None
+        Data version; rows with ``since`` newer than it are left out.
+
+    Returns
+    -------
+    Mapping[str, DrugCost]
+        One cost per drug of that version, keyed and sorted by ``drug_id``.
+
+    Raises
+    ------
+    DatabaseValidationError
+        If the database is invalid, or a drug of that version has no cost (as for every version
+        before 1.2.0).
+    """
+    directory = _resolve_data_dir(data_dir)
+    validate_database(directory)
+    package = read_descriptor(directory)
+    version_text = version if version is not None else package.version
+    target_version = parse_semver(version_text)
+    rows = _versioned_rows(directory, package, "drug_costs", target_version)
+    costs = {
+        _as_str(row["drug_id"]): DrugCost(
+            drug_id=_as_str(row["drug_id"]),
+            monthly_cost_cents=_as_int(row["monthly_cost_cents"]),
+            source=_as_optional_str(row["source"]),
+        )
+        for row in rows
+    }
+    drugs = _drugs(directory, package, target_version)
+    problems = validation.missing_drug_costs((d.drug_id for d in drugs), costs)
+    if problems:
+        raise DatabaseValidationError(problems)
+    return {drug_id: costs[drug_id] for drug_id in sorted(costs)}
 
 
 def _categories(

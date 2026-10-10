@@ -9,6 +9,7 @@ import pytest
 
 from symbolic_ai.dataloader import load_ontology
 from symbolic_ai.p1_ej2_ontology.forward_chaining import Closure, KnowledgeBase, fc_closure
+from symbolic_ai.p1_ej2_ontology.main import EJ2_DATA_VERSION
 from symbolic_ai.p1_ej2_ontology.ontology import Ontology, build_ontology, to_knowledge_base
 
 # ``--import-mode=importlib`` does not add test directories to ``sys.path``; the plain helper
@@ -22,8 +23,8 @@ from ej2_toy_data import toy_ontology_data  # noqa: E402
 
 @pytest.fixture(scope="session")
 def real_ontology() -> Ontology:
-    """The ontology of the committed database."""
-    return build_ontology(load_ontology())
+    """The ontology of the committed database, at the data version EJ2 is pinned to."""
+    return build_ontology(load_ontology(version=EJ2_DATA_VERSION))
 
 
 @pytest.fixture(scope="session")

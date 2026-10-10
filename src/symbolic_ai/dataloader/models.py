@@ -156,6 +156,18 @@ class Formulary:
 
 
 @dataclass(frozen=True, slots=True)
+class DrugCost:
+    """What one month of treatment with a drug costs, in euro cents (data 1.2.0, EJ3).
+
+    The values are illustrative, like the rest of the formulary: they are not real prices.
+    """
+
+    drug_id: str
+    monthly_cost_cents: int
+    source: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Patient:
     """A fictitious patient."""
 

@@ -9,7 +9,7 @@ EJ3 search) and Práctica 2 all read the same tables, described here.
 The patients are invented. The formulary is a didactic simplification of real pharmacology, built
 for a symbolic-AI exercise; it is **not clinical guidance** and must not be used to inform an actual
 prescribing decision. ATC and ICD-10 codes are written from memory and have not been checked against
-the WHO index.
+the WHO index. The drug costs are illustrative values chosen for the exercise, not real prices.
 
 ## Layout
 
@@ -31,6 +31,10 @@ the links written once per category (`indications.csv`, `contraindications.csv`,
 category, `coprescriptions.csv`), the therapeutic families (`families.csv`) and the disjoint sets
 and partitions (`disjoint_sets.csv`). EJ2 derives the drug-level formulary from these tables; it
 never reads the drug-level tables of `formulary/` except to compare with them.
+
+`formulary/drug_costs.csv` (EJ3, since 1.2.0) gives each drug the cost of one month of treatment,
+in euro cents. It is a table of its own, read with `load_drug_costs`: `load_formulary` and the
+`Formulary` it returns are unchanged. Every drug must have one cost, none negative.
 
 See `../docs` (private TFM repository, not in this code repository) for the full schema
 specification, `SPECIFICATIONS/01-database.md`.

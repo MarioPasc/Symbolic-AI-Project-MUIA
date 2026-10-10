@@ -42,7 +42,7 @@ def _problems(data_dir: Path) -> tuple[str, ...]:
 
 def test_ontology_table_counts(real_data_dir: Path) -> None:
     ontology = load_ontology(data_dir=real_data_dir)
-    assert ontology.version == "1.1.0"
+    assert ontology.version == "1.2.0"
     assert len(ontology.categories) == 33
     assert len(ontology.subcategories) == 36
     assert len(ontology.definitions) == 1
