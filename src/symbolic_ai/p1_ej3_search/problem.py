@@ -91,7 +91,7 @@ class RegimenProblem:
 
     Only the first uncovered condition (in alphabetical order) is branched on. The order in which
     conditions are covered does not change the regimen reached, so one condition per node is
-    enough, as for the variables of a constraint satisfaction problem (AIMA 4th ed. §6.3).
+    enough, as for the variables of a constraint satisfaction problem (AIMA 4th ed. §5.3).
 
     For every regimen that satisfies A1-A6 some goal state is a subset of it, and with it at most
     as dear, because a path may always pick its drugs inside that regimen. The cheapest goal
