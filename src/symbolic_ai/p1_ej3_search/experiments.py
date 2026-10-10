@@ -31,7 +31,7 @@ from symbolic_ai.p1_ej1_logic import (
 from symbolic_ai.p1_ej3_search.agent import CostAwareAgent, worst_case_record
 from symbolic_ai.p1_ej3_search.errors import EJ3Error
 from symbolic_ai.p1_ej3_search.problem import DomainPruning, RegimenProblem
-from symbolic_ai.p1_ej3_search.search import Algorithm, search
+from symbolic_ai.p1_ej3_search.search import Algorithm, effective_branching_factor, search
 
 __all__ = [
     "CONFIGURATIONS",
@@ -104,12 +104,18 @@ class ScenarioResult:
 
 @dataclass(frozen=True, slots=True)
 class SearchRun:
-    """P7: one configuration on one satisfiable record."""
+    """P7: one configuration on one satisfiable record.
+
+    ``depth`` is the number of actions on the solution path and ``effective_branching_factor``
+    the b* of AIMA 4th ed. §3.6.1 computed from ``generated`` and ``depth`` (``None`` at depth 0).
+    """
 
     configuration: str
     cost: int
     expanded: int
     generated: int
+    depth: int
+    effective_branching_factor: float | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,7 +141,11 @@ class ComparisonInstance:
 
 @dataclass(frozen=True, slots=True)
 class ConfigurationSummary:
-    """P7: one configuration over the satisfiable records (excess is cost above the minimum)."""
+    """P7: one configuration over the satisfiable records (excess is cost above the minimum).
+
+    ``mean_effective_branching_factor`` is the mean b* over the runs whose solution has at least
+    one action.
+    """
 
     configuration: str
     algorithm: str
@@ -147,6 +157,7 @@ class ConfigurationSummary:
     max_expanded: int
     mean_generated: float
     max_generated: int
+    mean_effective_branching_factor: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,13 +176,14 @@ class BaselineSummary:
 
 @dataclass(frozen=True, slots=True)
 class EffortByConditions:
-    """P7: mean costs and mean nodes expanded per configuration, by number of conditions."""
+    """P7: mean costs, nodes expanded and b* per configuration, by number of conditions."""
 
     n_conditions: int
     n_satisfiable: int
     mean_minimum_cost: float
     mean_baseline_cost: float
     mean_expanded: dict[str, float]
+    mean_effective_branching_factor: dict[str, float]
 
 
 @dataclass(frozen=True, slots=True)
@@ -435,7 +447,15 @@ def _run(
     result = search(problem, configuration.algorithm)
     if result.cost is None:
         raise EJ3Error(f"{configuration.name} finds no regimen on the satisfiable record {label}")
-    return SearchRun(configuration.name, result.cost, result.expanded, result.generated)
+    depth = len(result.chosen)
+    return SearchRun(
+        configuration.name,
+        result.cost,
+        result.expanded,
+        result.generated,
+        depth,
+        effective_branching_factor(result.generated, depth),
+    )
 
 
 def _number(value: float | None) -> float:
@@ -469,6 +489,18 @@ def _summarise(
         max_expanded=max((run.expanded for run in runs), default=0),
         mean_generated=_mean([run.generated for run in runs]),
         max_generated=max((run.generated for run in runs), default=0),
+        mean_effective_branching_factor=_mean_branching(runs),
+    )
+
+
+def _mean_branching(runs: Sequence[SearchRun]) -> float:
+    """Mean b* over the runs that have one (solution depth at least 1), ``0.0`` if none has."""
+    return _mean(
+        [
+            run.effective_branching_factor
+            for run in runs
+            if run.effective_branching_factor is not None
+        ]
     )
 
 
@@ -489,7 +521,7 @@ def _summarise_baseline(satisfiable: Sequence[ComparisonInstance]) -> BaselineSu
 def _effort_by_conditions(
     satisfiable: Sequence[ComparisonInstance],
 ) -> tuple[EffortByConditions, ...]:
-    """Mean costs and mean nodes expanded per configuration, per number of present conditions."""
+    """Mean costs, nodes expanded and b* per configuration, per number of present conditions."""
     rows = []
     for k in sorted({len(i.conditions) for i in satisfiable}):
         group = [i for i in satisfiable if len(i.conditions) == k]
@@ -501,6 +533,9 @@ def _effort_by_conditions(
                 mean_baseline_cost=_mean([_number(i.baseline_cost) for i in group]),
                 mean_expanded={
                     c.name: _mean([_run_of(i, c).expanded for i in group]) for c in CONFIGURATIONS
+                },
+                mean_effective_branching_factor={
+                    c.name: _mean_branching([_run_of(i, c) for i in group]) for c in CONFIGURATIONS
                 },
             )
         )

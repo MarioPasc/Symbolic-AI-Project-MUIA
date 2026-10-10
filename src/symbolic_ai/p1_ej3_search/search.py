@@ -5,7 +5,7 @@ module chooses the evaluation function of each, counts what the search asks of t
 aima's own ``InstrumentedProblem``, and turns the goal node into a typed result. A*, greedy
 best-first and uniform-cost search are best-first graph search with f = g + h, f = h and f = g
 (AIMA 4th ed. Fig. 3.7, §3.5.2, §3.5.1 and §3.4.2); IDA* is iterative deepening on the f-cost
-(§3.5.5).
+(§3.5.5). The effort of a search is summarised by its effective branching factor (§3.6.1).
 """
 
 from __future__ import annotations
@@ -17,7 +17,12 @@ from typing import Any, cast
 from aima import search as aima_search
 from symbolic_ai.p1_ej3_search.problem import RegimenProblem, State
 
-__all__ = ["Algorithm", "SearchResult", "search"]
+__all__ = ["Algorithm", "SearchResult", "effective_branching_factor", "search"]
+
+#: Absolute tolerance of the bisection in :func:`effective_branching_factor`.
+_BISECTION_TOLERANCE = 1e-12
+#: Bisection steps that bring any interval of doubles below one ulp; a guard against looping.
+_BISECTION_MAX_STEPS = 2_000
 
 
 class Algorithm(StrEnum):
@@ -116,3 +121,63 @@ def _goal_node(algorithm: Algorithm, problem: Any) -> Any:
     if algorithm is Algorithm.GREEDY:
         return aima_search.best_first_graph_search(problem, problem.h)
     return aima_search.uniform_cost_search(problem)
+
+
+def effective_branching_factor(generated: int, depth: int) -> float | None:
+    """Return the effective branching factor b* of a search (AIMA 4th ed. §3.6.1).
+
+    If a search generates N nodes and its solution is at depth d, b* is the branching factor that
+    a uniform tree of depth d would need to contain N + 1 nodes:
+    N + 1 = 1 + b* + (b*)^2 + ... + (b*)^d. The right-hand side increases with b* >= 0, equals
+    d + 1 <= N + 1 at b* = 1 and is at least N + 1 at b* = N, so the root lies in [1, N] and is
+    found by bisection.
+
+    Parameters
+    ----------
+    generated : int
+        N, the nodes generated (calls to ``result``; the root is not counted).
+    depth : int
+        d, the number of actions on the solution path.
+
+    Returns
+    -------
+    float | None
+        b* rounded to 4 decimals, or ``None`` when ``depth`` is 0 (the root is the goal and the
+        equation has no unique root).
+
+    Raises
+    ------
+    ValueError
+        If ``generated`` or ``depth`` is negative, or ``generated < depth`` (a path of d actions
+        generates at least d nodes).
+    """
+    if generated < 0 or depth < 0:
+        raise ValueError(f"generated and depth must be non-negative, got {generated}, {depth}")
+    if depth == 0:
+        return None
+    if generated < depth:
+        raise ValueError(
+            f"a solution at depth {depth} needs at least {depth} nodes, got {generated}"
+        )
+    target = generated + 1
+    low, high = 1.0, float(max(1, generated))
+    for _ in range(_BISECTION_MAX_STEPS):
+        middle = (low + high) / 2
+        if high - low <= _BISECTION_TOLERANCE or middle in (low, high):
+            break
+        if _uniform_tree_size(middle, depth, target) < target:
+            low = middle
+        else:
+            high = middle
+    return round((low + high) / 2, 4)
+
+
+def _uniform_tree_size(branching: float, depth: int, cap: float) -> float:
+    """Return 1 + b + ... + b^depth, stopping early once it exceeds ``cap`` (no overflow)."""
+    total, term = 1.0, 1.0
+    for _ in range(depth):
+        term *= branching
+        total += term
+        if total > cap:
+            break
+    return total

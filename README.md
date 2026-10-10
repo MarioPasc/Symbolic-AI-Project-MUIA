@@ -171,13 +171,15 @@ python -m symbolic_ai.p1_ej3_search.main --experiments --workers 8   # P6 and P7
 symai-ej3 --all
 ```
 
-`--experiments` writes `outputs/ej3/results.json` (schema `symai.ej3.results/1`); the file is
+`--experiments` writes `outputs/ej3/results.json` (schema `symai.ej3.results/2`); the file is
 byte-identical for any `--workers`. P6 decides the five encounters of the database. P7 takes the
 4,032 fully observed records and, on the 2,752 satisfiable ones, runs the four algorithms with and
 without the pruning, checks every cost against the cheapest regimen of the EJ1 oracle
 (`RegimenSpace.regimens`, which the agent never uses) and measures how far Agent 1's own regimen is
 from it. Nearly all of the run time is Agent 1 classifying the drugs of each record (37 SAT calls);
-the searches themselves take seconds.
+the searches themselves take seconds. Each run also reports its solution depth d and its effective branching factor
+b*, the root of N + 1 = 1 + b* + ... + (b*)^d for the N nodes generated (AIMA 4th ed. §3.6.1),
+averaged per configuration and per number of conditions.
 
 ## Test
 

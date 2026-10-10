@@ -10,7 +10,7 @@ import pytest
 from symbolic_ai.dataloader.models import Encounter, Formulary
 from symbolic_ai.p1_ej1_logic import RegimenSpace
 from symbolic_ai.p1_ej1_logic.experiments import as_jsonable
-from symbolic_ai.p1_ej3_search import Algorithm
+from symbolic_ai.p1_ej3_search import Algorithm, effective_branching_factor
 from symbolic_ai.p1_ej3_search.experiments import (
     CONFIGURATIONS,
     ComparisonResult,
@@ -181,6 +181,44 @@ def test_effort_by_number_of_conditions(comparison: ComparisonResult) -> None:
     assert [r.mean_minimum_cost for r in rows] == [269.1667, 494.0, 720.0]
     assert rows[0].mean_expanded["idastar"] == 1.0833
     assert set(rows[0].mean_expanded) == {c.name for c in CONFIGURATIONS}
+
+
+def test_every_run_carries_its_depth_and_effective_branching_factor(
+    comparison: ComparisonResult,
+) -> None:
+    runs = [run for instance in comparison.instances for run in instance.runs]
+    assert runs
+    for run in runs:
+        assert 1 <= run.depth <= run.generated
+        assert run.effective_branching_factor == effective_branching_factor(
+            run.generated, run.depth
+        )
+    by_record = {(i.conditions, i.present_risk_factors): i for i in comparison.instances}
+    forced = by_record[(("PAIN",), ("AGE65", "LIVER"))]
+    for run in forced.runs:
+        assert (run.depth, run.effective_branching_factor) == (1, float(run.generated))
+
+
+def _mean_of(values: list[float]) -> float:
+    return round(sum(values) / len(values), 4)
+
+
+def test_summaries_carry_the_mean_effective_branching_factor(comparison: ComparisonResult) -> None:
+    satisfiable = [i for i in comparison.instances if i.minimum_cost is not None]
+    for index, summary in enumerate(comparison.configurations):
+        b_stars = [i.runs[index].effective_branching_factor for i in satisfiable]
+        assert summary.mean_effective_branching_factor == _mean_of(
+            [b for b in b_stars if b is not None]
+        )
+        assert summary.mean_effective_branching_factor >= 1.0
+    for row in comparison.by_n_conditions:
+        group = [i for i in satisfiable if len(i.conditions) == row.n_conditions]
+        assert set(row.mean_effective_branching_factor) == {c.name for c in CONFIGURATIONS}
+        for index, configuration in enumerate(CONFIGURATIONS):
+            b_stars = [i.runs[index].effective_branching_factor for i in group]
+            assert row.mean_effective_branching_factor[configuration.name] == _mean_of(
+                [b for b in b_stars if b is not None]
+            )
 
 
 def test_comparison_does_not_depend_on_workers(

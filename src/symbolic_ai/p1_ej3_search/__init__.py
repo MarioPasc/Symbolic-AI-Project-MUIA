@@ -15,7 +15,12 @@ from symbolic_ai.p1_ej3_search.errors import (
     SearchInvariantError,
 )
 from symbolic_ai.p1_ej3_search.problem import DomainPruning, RegimenProblem
-from symbolic_ai.p1_ej3_search.search import Algorithm, SearchResult, search
+from symbolic_ai.p1_ej3_search.search import (
+    Algorithm,
+    SearchResult,
+    effective_branching_factor,
+    search,
+)
 
 #: The database version EJ3 is pinned to: the formulary of EJ1 plus the drug costs.
 EJ3_DATA_VERSION = "1.2.0"
@@ -32,6 +37,7 @@ __all__ = [
     "RegimenProblem",
     "SearchInvariantError",
     "SearchResult",
+    "effective_branching_factor",
     "search",
     "worst_case_record",
 ]

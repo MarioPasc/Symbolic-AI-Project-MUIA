@@ -11,7 +11,13 @@ import pytest
 
 from symbolic_ai.dataloader.models import Formulary
 from symbolic_ai.p1_ej1_logic import FullRecord, RegimenSpace
-from symbolic_ai.p1_ej3_search import Algorithm, DomainPruning, RegimenProblem, search
+from symbolic_ai.p1_ej3_search import (
+    Algorithm,
+    DomainPruning,
+    RegimenProblem,
+    effective_branching_factor,
+    search,
+)
 
 _THIS_DIR = Path(__file__).resolve().parent
 if str(_THIS_DIR) not in sys.path:
@@ -241,3 +247,41 @@ def test_every_record_matches_the_oracle(
 ) -> None:
     every = _subsets(formulary.risk_factor_ids)
     assert _check_against_the_oracle(formulary, costs, space, every) == 2752
+
+
+# --- effective branching factor (AIMA 4th ed. §3.6.1) -------------------------------------------
+
+
+def test_effective_branching_factor_of_the_aima_example() -> None:
+    """AIMA's example: 52 nodes generated for a solution at depth 5 give b* = 1.92."""
+    b_star = effective_branching_factor(52, 5)
+    assert b_star is not None
+    assert round(b_star, 2) == 1.92
+    assert 1 + sum(b_star**i for i in range(1, 6)) == pytest.approx(53, abs=1e-2)
+
+
+@pytest.mark.parametrize("depth", [1, 2, 5, 9])
+def test_effective_branching_factor_is_one_when_only_the_path_is_generated(depth: int) -> None:
+    assert effective_branching_factor(depth, depth) == 1.0
+
+
+@pytest.mark.parametrize("generated", [1, 2, 7, 118])
+def test_effective_branching_factor_at_depth_one_is_the_nodes_generated(generated: int) -> None:
+    assert effective_branching_factor(generated, 1) == float(generated)
+
+
+@pytest.mark.parametrize("generated", [0, 3])
+def test_effective_branching_factor_is_undefined_at_depth_zero(generated: int) -> None:
+    assert effective_branching_factor(generated, 0) is None
+
+
+def test_effective_branching_factor_of_a_large_search_does_not_overflow() -> None:
+    b_star = effective_branching_factor(10**6, 200)
+    assert b_star is not None
+    assert 1.0 < b_star < 1.1
+
+
+@pytest.mark.parametrize(("generated", "depth"), [(2, 3), (0, 1), (-1, 0), (5, -1), (-3, -2)])
+def test_effective_branching_factor_rejects_impossible_inputs(generated: int, depth: int) -> None:
+    with pytest.raises(ValueError, match=r"depth|non-negative"):
+        effective_branching_factor(generated, depth)

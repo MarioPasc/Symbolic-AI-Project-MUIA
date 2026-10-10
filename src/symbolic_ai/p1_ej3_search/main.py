@@ -41,7 +41,7 @@ from symbolic_ai.p1_ej3_search.experiments import (
 __all__ = ["RESULTS_SCHEMA", "build_arg_parser", "main"]
 
 #: Identifier and version of the layout of ``results.json``; bump it when a field changes meaning.
-RESULTS_SCHEMA = "symai.ej3.results/1"
+RESULTS_SCHEMA = "symai.ej3.results/2"
 #: The command recorded in the results' provenance (worker count and output directory do not
 #: change the results, so they are not part of it).
 _EXPERIMENTS_COMMAND = "python -m symbolic_ai.p1_ej3_search.main --experiments"
@@ -302,7 +302,8 @@ def _print_summary(scenarios: Sequence[ScenarioResult], comparison: ComparisonRe
         print(
             f"P7 {c.configuration}: cheapest in {c.n_optimal}/{n}, mean excess "
             f"{_euros(round(c.mean_excess_cost))}; expanded mean {c.mean_expanded} max "
-            f"{c.max_expanded}; generated mean {c.mean_generated} max {c.max_generated}"
+            f"{c.max_expanded}; generated mean {c.mean_generated} max {c.max_generated}; "
+            f"b* mean {c.mean_effective_branching_factor}"
         )
 
 
