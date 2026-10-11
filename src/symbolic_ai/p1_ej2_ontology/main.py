@@ -23,7 +23,11 @@ from pathlib import Path
 import symbolic_ai
 from symbolic_ai.dataloader import load_formulary, load_ontology
 from symbolic_ai.p1_ej2_ontology import owl_oracle
-from symbolic_ai.p1_ej2_ontology.errors import ResultsFormatError, UnknownIdentifierError
+from symbolic_ai.p1_ej2_ontology.errors import (
+    OracleUnavailableError,
+    ResultsFormatError,
+    UnknownIdentifierError,
+)
 from symbolic_ai.p1_ej2_ontology.experiments import (
     ConsistencyResult,
     FixedPointResult,
@@ -70,6 +74,10 @@ REFERENCE_VERSION = "1.0.0"
 AIMA_PYTHON_COMMIT = "f104e03fdc1582f014b3a4c93f1a9b7d2da70114"
 
 _EXPERIMENTS_COMMAND = "python -m symbolic_ai.p1_ej2_ontology.main --experiments"
+_NO_DOT = (
+    "Graphviz's `dot` was not found, so the figures were not drawn (install Graphviz: it comes "
+    "with environment.yml, or as the system package `graphviz`)"
+)
 _DEFAULT_OUT_DIR = Path("outputs") / "ej2"
 _RESULTS_FILE = "results.json"
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -282,7 +290,7 @@ def _print_summary(
 
 def _experiment_results(args: argparse.Namespace, ontology: Ontology) -> dict[str, object]:
     """Run P3 and P4 (with the oracle unless ``--no-oracle``); return ``results.json``'s content."""
-    with_oracle = not args.no_oracle
+    with_oracle = not args.no_oracle and _oracle_available()
     reasoned = reason(ontology)
     reference = load_formulary(data_dir=args.data_dir, version=REFERENCE_VERSION)
     base_run = prototypes_run = None
@@ -305,6 +313,25 @@ def _experiment_results(args: argparse.Namespace, ontology: Ontology) -> dict[st
         "inheritance": as_jsonable(inheritance),
         "consistency": as_jsonable(consistency),
     }
+
+
+def _oracle_available() -> bool:
+    """Whether HermiT can run; if not, say why and go on as with ``--no-oracle``.
+
+    HermiT needs a Java runtime that ``environment.yml`` does not install. Without it the forward
+    chaining and the figures are unchanged and only the oracle fields of ``results.json`` are null,
+    so the run continues instead of stopping on a missing system dependency.
+    """
+    try:
+        owl_oracle.check_available()
+    except OracleUnavailableError as exc:
+        print(
+            f"warning: {exc}; running without the HermiT oracle, as with --no-oracle "
+            "(its fields in results.json are null)",
+            file=sys.stderr,
+        )
+        return False
+    return True
 
 
 def _load_results(path: Path) -> Mapping[str, object]:
@@ -343,8 +370,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     # The figures need Graphviz's `dot`, installed in the conda environment (see the helper).
-    ensure_graphviz_on_path()
+    has_dot = ensure_graphviz_on_path()
     if args.plot is not None:
+        if not has_dot:
+            print(f"error: {_NO_DOT}", file=sys.stderr)
+            return 1
         _draw_figures(args.plot, args.out_dir)
         return 0
     ontology = build_ontology(load_ontology(data_dir=args.data_dir, version=EJ2_DATA_VERSION))
@@ -370,6 +400,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         json.dumps(results, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
     )
     print(f"wrote {results_path}")
+    if not has_dot:
+        print(f"warning: {_NO_DOT}; redraw them with --plot {results_path}", file=sys.stderr)
+        return 0
     # The figures are drawn from the file just written, so they can only show saved results.
     _draw_figures(results_path, args.out_dir)
     return 0

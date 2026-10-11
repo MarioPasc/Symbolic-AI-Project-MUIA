@@ -4,6 +4,8 @@ Code for the practicals of *IA simbólica* (Máster Universitario en Inteligenci
 2026/27): a knowledge-based agent that prescribes safely for patients with several conditions,
 built over one shared drug formulary and patient database (`data/`).
 
+Authors: Rodrigo Laso Mielgo and Mario Pascual González.
+
 ## Install
 
 ```bash
@@ -41,9 +43,11 @@ under the names the report's LaTeX uses (`ej1_value_ordering.pdf`, `ej2_ontology
 `ej2_taxonomy_a.pdf`, `ej2_taxonomy_b.pdf`).
 
 **Prerequisites.** EJ2's oracle (HermiT, bundled with `owlready2`) needs a Java runtime ≥ 11 on the
-system, and its figures need Graphviz's `dot` (installed by `environment.yml`). Without Java, add
-`--no-oracle`: it is passed to EJ2 only, the forward-chaining results are the same, and the oracle
-fields of `outputs/ej2/results.json` are `null`.
+system, and its figures need Graphviz's `dot` (installed by `environment.yml`, found even if the
+environment is not activated). Without Java, EJ2 prints a warning and runs as with `--no-oracle`:
+the forward-chaining results and the figures are the same, and the oracle fields of
+`outputs/ej2/results.json` are `null`. Without `dot` (e.g. a pip-only install), EJ2 writes
+`results.json`, skips the figures and says how to redraw them with `--plot`.
 
 Files written (`outputs/` is git-ignored):
 

@@ -7,7 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from symbolic_ai.p1_ej2_ontology.errors import ResultsFormatError
+from symbolic_ai.p1_ej2_ontology import main as ej2_main
+from symbolic_ai.p1_ej2_ontology import owl_oracle
+from symbolic_ai.p1_ej2_ontology.errors import OracleUnavailableError, ResultsFormatError
 from symbolic_ai.p1_ej2_ontology.main import RESULTS_SCHEMA, main
 
 pytestmark = pytest.mark.integration
@@ -69,3 +71,37 @@ def test_experiments_without_oracle_write_a_reproducible_results_file(tmp_path: 
     for stem in ("fig_ej2_ontology", "fig_ej2_ontology_inferred"):
         for suffix in (".dot", ".pdf", ".png"):
             assert (first / f"{stem}{suffix}").exists()
+
+
+@pytest.mark.slow
+def test_experiments_without_java_run_as_with_no_oracle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def no_java() -> None:
+        raise OracleUnavailableError("no Java runtime found ('java'); HermiT needs Java >= 11")
+
+    monkeypatch.setattr(owl_oracle, "check_available", no_java)
+    assert main(["--experiments", "--out-dir", str(tmp_path)]) == 0
+    results = json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))
+    assert results["provenance"]["oracle"] is None
+    assert results["taxonomy"]["oracle_classification"] is None
+    assert "running without the HermiT oracle" in capsys.readouterr().err
+
+
+@pytest.mark.slow
+def test_experiments_without_graphviz_write_the_results_and_skip_the_figures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(ej2_main, "ensure_graphviz_on_path", lambda: False)
+    assert main(["--experiments", "--no-oracle", "--out-dir", str(tmp_path)]) == 0
+    assert (tmp_path / "results.json").exists()
+    assert not list(tmp_path.glob("fig_ej2_*"))
+    assert "figures were not drawn" in capsys.readouterr().err
+
+
+def test_plot_without_graphviz_exits_with_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(ej2_main, "ensure_graphviz_on_path", lambda: False)
+    assert main(["--plot", str(tmp_path / "results.json"), "--out-dir", str(tmp_path)]) == 1
+    assert "figures were not drawn" in capsys.readouterr().err
