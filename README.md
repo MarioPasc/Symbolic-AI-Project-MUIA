@@ -1,4 +1,4 @@
-# symnbolic_ai_project
+# IA Simbólica Aplicada a la Farmacología
 
 Code for the practicals of *IA simbólica* (Máster Universitario en Inteligencia Artificial, UAM,
 2026/27): a knowledge-based agent that prescribes safely for patients with several conditions,
@@ -204,9 +204,9 @@ python -m symbolic_ai.dataloader.validate          # check data/ against its sch
 ## Layout
 
 ```
-symnbolic_ai_project/
+./  (repository root)
 ├── pyproject.toml, environment.yml   package metadata, dependencies, tool configuration
-├── data/                             the formulary and patient database (01-database.md)
+├── data/                             the formulary and patient database (see `data/README.md`)
 ├── outputs/                          run artefacts (JSON, figures), git-ignored, recreated by main.py
 ├── src/
 │   ├── aima/                         vendored aima-python (read-only; see src/aima/VENDORED.md)
@@ -220,8 +220,8 @@ symnbolic_ai_project/
 └── tests/                            mirrors src/symbolic_ai/
 ```
 
-`docs/SPECIFICATIONS/02-code-architecture.md` (private TFM repository) is the full design
-reference for this layout and for `p1_ej1_logic`'s file roles.
+Each exercise's design is described in the report (its *Metodología* subsection), and each module's role
+in its docstring.
 
 ## Credits
 
