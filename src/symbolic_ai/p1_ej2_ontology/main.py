@@ -44,6 +44,7 @@ from symbolic_ai.p1_ej2_ontology.plot import (
     INFERRED_FIGURE,
     ONTOLOGY_FIGURE,
     TaxonomyPanel,
+    ensure_graphviz_on_path,
     plot_ontology,
     plot_taxonomy_diff,
     taxonomy_figure_stem,
@@ -341,6 +342,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     args = build_arg_parser().parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    # The figures need Graphviz's `dot`, installed in the conda environment (see the helper).
+    ensure_graphviz_on_path()
     if args.plot is not None:
         _draw_figures(args.plot, args.out_dir)
         return 0

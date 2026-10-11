@@ -27,7 +27,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import statistics
+import sys
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -56,6 +58,7 @@ __all__ = [
     "build_ontology_graph",
     "build_taxonomy_graph",
     "condition_node",
+    "ensure_graphviz_on_path",
     "plot_ontology",
     "plot_taxonomy_diff",
     "risk_factor_node",
@@ -63,6 +66,32 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+
+def ensure_graphviz_on_path() -> bool:
+    """Make Graphviz's ``dot`` findable when the conda environment was not activated.
+
+    ``environment.yml`` installs Graphviz inside the environment, next to its Python
+    (``<prefix>/bin``, or ``<prefix>/Library/bin`` on Windows). An interpreter started by its
+    absolute path or from an IDE, without ``conda activate``, does not have that directory on
+    ``PATH``, so the ``graphviz`` package cannot run ``dot``. This prepends it to ``PATH`` when
+    ``dot`` is missing and the environment has it; otherwise it changes nothing.
+
+    Returns
+    -------
+    bool
+        Whether ``dot`` is on ``PATH`` after the call.
+    """
+    if shutil.which("dot") is not None:
+        return True
+    prefix = Path(sys.prefix)
+    for directory in (prefix / "bin", prefix / "Library" / "bin"):
+        if shutil.which("dot", path=str(directory)) is not None:
+            os.environ["PATH"] = os.pathsep.join([str(directory), os.environ.get("PATH", "")])
+            logger.info("Graphviz found in %s, added to PATH", directory)
+            return True
+    return False
+
 
 #: File stems of the two variants inside the output directory.
 ONTOLOGY_FIGURE = "fig_ej2_ontology"

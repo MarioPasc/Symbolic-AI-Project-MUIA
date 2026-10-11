@@ -11,6 +11,7 @@ from symbolic_ai.dataloader import load_ontology
 from symbolic_ai.p1_ej2_ontology.forward_chaining import Closure, KnowledgeBase, fc_closure
 from symbolic_ai.p1_ej2_ontology.main import EJ2_DATA_VERSION
 from symbolic_ai.p1_ej2_ontology.ontology import Ontology, build_ontology, to_knowledge_base
+from symbolic_ai.p1_ej2_ontology.plot import ensure_graphviz_on_path
 
 # ``--import-mode=importlib`` does not add test directories to ``sys.path``; the plain helper
 # module ``ej2_toy_data`` is imported from here, as EJ1's conftest does for ``fixture_data``.
@@ -19,6 +20,9 @@ if str(_THIS_DIR) not in sys.path:
     sys.path.insert(0, str(_THIS_DIR))
 
 from ej2_toy_data import toy_ontology_data  # noqa: E402
+
+# Run the figure tests also when the environment's interpreter is used without `conda activate`.
+ensure_graphviz_on_path()
 
 
 @pytest.fixture(scope="session")
