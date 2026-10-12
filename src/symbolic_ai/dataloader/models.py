@@ -168,6 +168,20 @@ class DrugCost:
 
 
 @dataclass(frozen=True, slots=True)
+class Pharmacokinetics:
+    """Washout and taper days of a drug (data 1.3.0, EJ4); illustrative values, not clinical ones.
+
+    ``washout_days`` is how many days the drug stays present after its last dose; ``taper_days`` is
+    how many days of reduced dose it needs before it may be stopped (``0``: it can stop at once).
+    """
+
+    drug_id: str
+    washout_days: int
+    taper_days: int
+    source: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Patient:
     """A fictitious patient."""
 
