@@ -223,7 +223,7 @@ def interaction_forbids(
 def constraint_function(problem: TransitionProblem) -> Constraint:
     """Return the constraint function of the CSP: the conjunction of T and I between two variables.
 
-    aima-python calls it as ``f(A, a, B, b)`` for neighbours ``A`` and ``B`` (``csp.py`` l.73) and
+    aima-python calls it as ``f(A, a, B, b)`` for neighbours ``A`` and ``B`` (``csp.py`` l.74) and
     requires it to be symmetric, which it is: T is checked in day order whichever variable comes
     first, and I is symmetric.
 
