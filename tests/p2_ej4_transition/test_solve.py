@@ -443,3 +443,47 @@ def test_min_conflicts_reports_not_found_never_infeasible(
 ) -> None:
     run = solve_min_conflicts(problem, horizon, max_steps=200, seed=0)
     assert run.status == "not_found"
+
+
+# --- deterministic assignment budget (wave 2, R3) -------------------------------------------------
+
+PLAIN_BT = SolverConfig("none", "static", "keep_first", False)
+
+
+def test_budget_stops_the_run_at_the_same_assignment() -> None:
+    config = dataclasses.replace(PLAIN_BT, max_assignments=10)
+    runs = [solve_horizon(worked_example(), 11, config) for _ in range(2)]
+    for run in runs:
+        assert (run.status, run.schedule) == ("budget", None)
+        # checked when the next variable is chosen, so the run stops one assignment past it
+        assert run.stats.assignments == 11
+    assert runs[0].stats.checks == runs[1].stats.checks
+
+
+@pytest.mark.parametrize(
+    ("horizon", "status", "assignments"), [(11, "infeasible", 218), (12, "solved", 266)]
+)
+def test_a_large_enough_budget_changes_nothing(horizon: int, status: str, assignments: int) -> None:
+    unbudgeted = solve_horizon(worked_example(), horizon, PLAIN_BT)
+    budgeted = solve_horizon(
+        worked_example(), horizon, dataclasses.replace(PLAIN_BT, max_assignments=assignments)
+    )
+    assert (unbudgeted.status, unbudgeted.stats.assignments) == (status, assignments)
+    assert (budgeted.status, budgeted.stats.assignments) == (status, assignments)
+    assert budgeted.schedule == unbudgeted.schedule
+
+
+def test_budget_ends_the_horizon_loop_as_unknown() -> None:
+    config = dataclasses.replace(PLAIN_BT, max_assignments=5)
+    result = find_min_horizon(worked_example(), config)
+    assert (result.status, result.h_star, result.schedule) == ("budget", None, None)
+    assert result.runs[-1].status == "budget"
+
+
+def test_default_config_has_no_budget() -> None:
+    assert MAIN_CONFIG.max_assignments is None
+
+
+def test_negative_budget_raises() -> None:
+    with pytest.raises(SolverError):
+        SolverConfig(max_assignments=-1)

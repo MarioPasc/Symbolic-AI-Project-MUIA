@@ -61,10 +61,10 @@ VariableOrder: TypeAlias = Literal["static", "mrv"]
 #: Value order: the domain order (the start drug first) or least constraining value.
 ValueOrder: TypeAlias = Literal["keep_first", "lcv"]
 #: Outcome of one horizon. ``not_found`` is only reported by min-conflicts, which cannot prove
-#: infeasibility; ``timeout`` means unknown.
-RunStatus: TypeAlias = Literal["solved", "infeasible", "timeout", "not_found"]
+#: infeasibility; ``timeout`` (the clock) and ``budget`` (the assignment budget) mean unknown.
+RunStatus: TypeAlias = Literal["solved", "infeasible", "timeout", "budget", "not_found"]
 #: Outcome of the horizon loop.
-ResultStatus: TypeAlias = Literal["solved", "no_transition_within_h_max", "timeout"]
+ResultStatus: TypeAlias = Literal["solved", "no_transition_within_h_max", "timeout", "budget"]
 #: What a trace event records (see :class:`TraceEvent`).
 TraceKind: TypeAlias = Literal["ac3", "select", "try", "prune", "wipeout", "backtrack", "solution"]
 
@@ -93,6 +93,10 @@ class SolverConfig:
         Whether AC-3 runs on the node-consistent domains before the search.
     timeout_s
         Wall-clock budget of one horizon, in seconds (``> 0``).
+    max_assignments
+        Deterministic budget of one horizon: the run stops with status ``"budget"`` once it has
+        made more than this many assignments (``None``: no budget). Unlike the clock, it stops a
+        run at the same point on every machine, which makes a table of costly runs reproducible.
 
     Raises
     ------
@@ -105,6 +109,7 @@ class SolverConfig:
     value_order: ValueOrder = "keep_first"
     ac3_preprocess: bool = True
     timeout_s: float = 30.0
+    max_assignments: int | None = None
 
     def __post_init__(self) -> None:
         """Reject values the type hints cannot enforce at run time."""
@@ -117,6 +122,8 @@ class SolverConfig:
                 raise SolverError(f"{name} must be one of {allowed}, got {getattr(self, name)!r}")
         if not self.timeout_s > 0:
             raise SolverError(f"timeout_s must be > 0, got {self.timeout_s}")
+        if self.max_assignments is not None and self.max_assignments < 0:
+            raise SolverError(f"max_assignments must be >= 0 or None, got {self.max_assignments}")
 
     @property
     def label(self) -> str:
@@ -175,7 +182,8 @@ class HorizonRun:
         ``H``.
     status
         ``"solved"``, ``"infeasible"`` (proved by AC-3 or by exhausting the search),
-        ``"timeout"`` (unknown) or ``"not_found"`` (min-conflicts gave up; unknown).
+        ``"timeout"`` (unknown), ``"budget"`` (the assignment budget ran out; unknown) or
+        ``"not_found"`` (min-conflicts gave up; unknown).
     schedule
         The solution, keyed ``(condition_id, day)`` in static order, or ``None``.
     stats
@@ -200,8 +208,9 @@ class TransitionResult:
     h_star
         The minimum horizon, or ``None`` if none was found.
     status
-        ``"solved"``, ``"no_transition_within_h_max"`` (every horizon ``0..h_max`` is infeasible)
-        or ``"timeout"`` (a horizon timed out, so the minimum is unknown).
+        ``"solved"``, ``"no_transition_within_h_max"`` (every horizon ``0..h_max`` is infeasible),
+        ``"timeout"`` or ``"budget"`` (a horizon ran out of time or of assignments, so the minimum
+        is unknown).
     runs
         One run per horizon tried, from 0 to the last one.
     schedule
@@ -270,7 +279,8 @@ def solve_horizon(
     Returns
     -------
     HorizonRun
-        Status ``"solved"``, ``"infeasible"`` or ``"timeout"``, the schedule and the effort.
+        Status ``"solved"``, ``"infeasible"``, ``"timeout"`` or ``"budget"``, the schedule and
+        the effort.
 
     Raises
     ------
@@ -296,8 +306,8 @@ def find_min_horizon(
     """Return the minimum horizon H* by solving H = 0, 1, 2, ... (the horizon loop, design §4.4).
 
     The first solvable horizon is the minimum because a solution for H extends to H + 1 by
-    repeating its last day (L2). The loop stops at the first solution, at the first timeout (the
-    minimum can then no longer be certified), or after ``h_max``.
+    repeating its last day (L2). The loop stops at the first solution, at the first timeout or
+    exhausted assignment budget (the minimum can then no longer be certified), or after ``h_max``.
 
     Parameters
     ----------
@@ -328,6 +338,8 @@ def find_min_horizon(
             return TransitionResult(horizon, "solved", tuple(runs), run.schedule)
         if run.status == "timeout":
             return TransitionResult(None, "timeout", tuple(runs), None)
+        if run.status == "budget":
+            return TransitionResult(None, "budget", tuple(runs), None)
     return TransitionResult(None, "no_transition_within_h_max", tuple(runs), None)
 
 
@@ -422,6 +434,8 @@ def _search(
         )
     except SolverTimeoutError:
         return "timeout", None, ac3_removed
+    except _AssignmentBudgetError:
+        return "budget", None, ac3_removed
     if assignment is None:
         return "infeasible", None, ac3_removed
     tracer.add("solution", None, None, f"all {len(assignment)} variables assigned")
@@ -498,12 +512,21 @@ def _emptied(csp: Any) -> Variable:
     return next(v for v in variables if not csp.curr_domains[v])
 
 
+class _AssignmentBudgetError(SolverError):
+    """Raised inside aima's search when a run exceeds ``max_assignments``; caught by _search."""
+
+
 def _variable_selector(
     config: SolverConfig, tracer: _Tracer, deadline: float
 ) -> Callable[[_Assignment, Any], Variable]:
     """Return the variable-selection function of the configuration, with the timeout check."""
 
     def select(assignment: _Assignment, csp: Any) -> Variable:
+        # The budget is checked before the clock, so a run it stops ends the same way everywhere.
+        if config.max_assignments is not None and csp.nassigns > config.max_assignments:
+            raise _AssignmentBudgetError(
+                f"the run exceeded its budget of {config.max_assignments} assignments"
+            )
         if time.perf_counter() > deadline:
             raise SolverTimeoutError(f"the run exceeded its budget of {config.timeout_s} s")
         variable: Variable
