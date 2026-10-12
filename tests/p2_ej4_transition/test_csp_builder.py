@@ -14,6 +14,7 @@ from symbolic_ai.p2_ej4_transition import (
     ModelError,
     TransitionProblem,
     Value,
+    synthetic,
 )
 from symbolic_ai.p2_ej4_transition.csp_builder import (
     Variable,
@@ -30,21 +31,44 @@ TOY_IDS = [k.problem.problem_id for k in TOYS]
 #: Horizons on which the structural properties are checked for every toy.
 HORIZONS = (0, 1, 2, 3, 5)
 
+#: X starts on x1 (2-day taper), which is no longer acceptable; x2 and x3 (no taper) are.
+SWITCH = TransitionProblem(
+    problem_id="switch",
+    event=Event(EventKind.NEW_RISK_FACTOR, "R"),
+    conditions=("X",),
+    risk_factors=("R",),
+    start={"X": "x1"},
+    candidates={"X": ("x1", "x2", "x3")},
+    acceptable={"X": ("x2", "x3")},
+    interactions=frozenset(),
+    washout_days=dict.fromkeys(ej4_toys.DRUGS, 0),
+    taper_days={**dict.fromkeys(ej4_toys.DRUGS, 0), "x1": 2},
+)
 
+
+# Keep-first order (design v2.3 §6.1): acceptable start drug, other acceptable drugs, withdrawn
+# start drug, other candidates, None last; each drug followed by its taper days.
 @pytest.mark.parametrize(
     ("problem", "condition", "expected"),
     [
-        (ej4_toys.T2.problem, "X", (("x1", 0), ("x1", 1), ("x1", 2), ("x2", 0))),
-        (ej4_toys.T3.problem, "Y", (None, ("y1", 0))),
+        # x1 withdrawn (2-day taper), x2 acceptable: the acceptable drug comes first.
+        (ej4_toys.T2.problem, "X", (("x2", 0), ("x1", 0), ("x1", 1), ("x1", 2))),
+        # a newly diagnosed condition: its drug first, the untreated value last.
+        (ej4_toys.T3.problem, "Y", (("y1", 0), None)),
+        # x1 still acceptable: kept first, with its taper day, then x2.
         (ej4_toys.T3.problem, "X", (("x1", 0), ("x1", 1), ("x2", 0))),
-        (ej4_toys.T6.problem, "X", (("x1", 0), ("x2", 0), ("x3", 0))),
+        # x1 withdrawn, x3 contraindicated and never given: acceptable, withdrawn, never given.
+        (ej4_toys.T6.problem, "X", (("x2", 0), ("x1", 0), ("x3", 0))),
+        # the start drug x2 is acceptable and kept first, before the alphabetically earlier x1.
         (
             dataclasses.replace(ej4_toys.T1.problem, start={"X": "x2"}),
             "X",
             (("x2", 0), ("x1", 0)),
         ),
+        # SWITCH: x1 withdrawn with a taper, two acceptable drugs in alphabetical order.
+        (SWITCH, "X", (("x2", 0), ("x3", 0), ("x1", 0), ("x1", 1), ("x1", 2))),
     ],
-    ids=["T2-taper", "T3-untreated-first", "T3-X", "T6", "start-drug-first"],
+    ids=["T2-withdrawn", "T3-untreated-last", "T3-kept", "T6", "kept-start", "SWITCH"],
 )
 def test_condition_values_are_in_keep_first_order(
     problem: TransitionProblem, condition: str, expected: tuple[Value, ...]
@@ -53,7 +77,7 @@ def test_condition_values_are_in_keep_first_order(
 
 
 def test_domains_of_t2_at_horizon_3() -> None:
-    middle = (("x1", 0), ("x1", 1), ("x1", 2), ("x2", 0))
+    middle = (("x2", 0), ("x1", 0), ("x1", 1), ("x1", 2))
     assert node_consistent_domains(ej4_toys.T2.problem, 3) == {
         ("X", 0): (("x1", 0),),
         ("X", 1): middle,
@@ -142,21 +166,6 @@ def test_negative_horizon_raises() -> None:
         build_csp(ej4_toys.T0.problem, -1)
 
 
-#: X starts on x1 (2-day taper), which is no longer acceptable; x2 and x3 (no taper) are.
-SWITCH = TransitionProblem(
-    problem_id="switch",
-    event=Event(EventKind.NEW_RISK_FACTOR, "R"),
-    conditions=("X",),
-    risk_factors=("R",),
-    start={"X": "x1"},
-    candidates={"X": ("x1", "x2", "x3")},
-    acceptable={"X": ("x2", "x3")},
-    interactions=frozenset(),
-    washout_days=dict.fromkeys(ej4_toys.DRUGS, 0),
-    taper_days={**dict.fromkeys(ej4_toys.DRUGS, 0), "x1": 2},
-)
-
-
 @pytest.mark.parametrize(
     ("before", "after", "allowed"),
     [
@@ -184,6 +193,46 @@ SWITCH = TransitionProblem(
 )
 def test_transition_constraint(before: Value, after: Value, allowed: bool) -> None:
     assert transition_allowed(SWITCH, "X", before, after) is allowed
+
+
+def _compact_transition_allowed(
+    problem: TransitionProblem, condition: str, before: Value, after: Value
+) -> bool:
+    """The compact implementation of T merged in wave 1 (design v2.1), kept as the reference."""
+    if after is None:
+        return before is None
+    if before is not None:
+        drug, phase = before
+        if after == before and phase == 0:
+            return True
+        if after == (drug, phase + 1) and phase < problem.taper_days[drug]:
+            return True
+        if after[0] == drug or phase != problem.taper_days[drug]:
+            return False
+    return after[1] == 0 and after[0] in problem.acceptable[condition]
+
+
+def test_transition_rows_match_the_compact_implementation() -> None:
+    # Every ordered pair of values of every condition: the toys, the worked example and 200
+    # synthetic problems (same-condition interactions, contraindicated tapers, both events).
+    from test_solve import worked_example
+
+    problems = [k.problem for k in TOYS]
+    problems += [SWITCH, worked_example(), *synthetic.random_problems(seed=0, count=200)]
+    pairs = 0
+    for problem in problems:
+        for condition in problem.conditions:
+            values = condition_values(problem, condition)
+            for before, after in itertools.product(values, repeat=2):
+                expected = _compact_transition_allowed(problem, condition, before, after)
+                assert transition_allowed(problem, condition, before, after) is expected, (
+                    problem.problem_id,
+                    condition,
+                    before,
+                    after,
+                )
+                pairs += 1
+    assert pairs > 30_000
 
 
 @pytest.mark.parametrize("day", [1, 2, 3])

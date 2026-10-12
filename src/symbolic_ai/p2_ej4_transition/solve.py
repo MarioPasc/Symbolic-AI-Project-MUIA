@@ -3,12 +3,14 @@
 Design decision D22: every algorithm comes from the vendored ``src/aima/csp.py`` (aima-python
 commit f104e03, MIT); this module only chooses and wraps them (design §6.1):
 
-- consistency before search: AC-3 (AIMA 4th ed. §5.2.1; ``csp.py`` l.200-238, 3rd ed. Fig. 6.3);
-- search: chronological backtracking (§5.3; l.449-475, 3rd ed. Fig. 6.5) with no inference,
-  forward checking or MAC (§5.3.2; l.423-443), a static or MRV variable order and a keep-first or
-  LCV value order (§5.3.1; l.386-420);
-- local search: min-conflicts (§5.4; l.478-503, 3rd ed. Fig. 6.8), which may find a solution but
-  can never prove that there is none.
+- consistency before search: AC-3 (AIMA 4th ed. §5.2.2 "Arc consistency"; ``csp.py``
+  l.200-238; 3rd ed. Fig. 6.3);
+- search: chronological backtracking (§5.3 "Backtracking search for CSPs"; l.449-475; 3rd ed.
+  Fig. 6.5) with no inference, forward checking or MAC (§5.3.2 "Interleaving search and
+  inference"; l.423-443), a static or MRV variable order and a keep-first or LCV value order
+  (§5.3.1 "Variable and value ordering"; l.386-420);
+- local search: min-conflicts (§5.4 "Local search for CSPs"; l.478-503; 3rd ed. Fig. 6.8), which
+  may find a solution but can never prove that there is none.
 
 The wrappers add, without editing aima: deterministic tie-breaks (MRV and AC-3's arc order follow
 the static variable order instead of chance or hash order), a per-run timeout, the trace of the
@@ -58,7 +60,7 @@ __all__ = [
 Inference: TypeAlias = Literal["none", "fc", "mac"]
 #: Variable order: static (by day, then condition) or minimum remaining values.
 VariableOrder: TypeAlias = Literal["static", "mrv"]
-#: Value order: the domain order (the start drug first) or least constraining value.
+#: Value order: keep-first (the static domain order, design §6.1) or least constraining value.
 ValueOrder: TypeAlias = Literal["keep_first", "lcv"]
 #: Outcome of one horizon. ``not_found`` is only reported by min-conflicts, which cannot prove
 #: infeasibility; ``timeout`` (the clock) and ``budget`` (the assignment budget) mean unknown.
@@ -87,8 +89,9 @@ class SolverConfig:
         ``"static"`` (aima's ``first_unassigned_variable``: by day, then condition) or ``"mrv"``
         (minimum remaining values, ties broken by the static order).
     value_order
-        ``"keep_first"`` (aima's ``unordered_domain_values``: the domain order, which tries the
-        start drug first) or ``"lcv"`` (aima's least-constraining-value).
+        ``"keep_first"`` (the static domain order of ``csp_builder.condition_values``: the start
+        drug if still acceptable, the other acceptable drugs, the withdrawn start drug, ``None``
+        last; kept stable after backtracking) or ``"lcv"`` (aima's least-constraining-value).
     ac3_preprocess
         Whether AC-3 runs on the node-consistent domains before the search.
     timeout_s
@@ -233,9 +236,10 @@ class TraceEvent:
         Position of the event in the trace (0, 1, 2, ...).
     kind
         ``"ac3"``: the AC-3 preprocessing removed ``value`` from ``variable``. ``"select"``: the
-        search chose ``variable``. ``"try"``: the search considered ``value`` for ``variable``;
-        ``detail`` says whether it was assigned or rejected by the check against the assigned
-        neighbours. ``"prune"``: forward checking or MAC removed ``value`` from ``variable``.
+        search chose ``variable``. ``"try"``: the search assigned ``value`` to ``variable`` (the
+        value passed aima's check against the assigned neighbours; with forward checking or MAC
+        every value left in a domain passes it). ``"prune"``: forward checking or MAC removed
+        ``value`` from ``variable``.
         ``"wipeout"``: the domain of ``variable`` became empty. ``"backtrack"``: every value of
         ``variable`` failed, so the search goes back. ``"solution"``: every variable is assigned.
     variable
@@ -263,7 +267,7 @@ def solve_horizon(
 
     The run is: build the CSP (node-consistent domains), optionally AC-3 to a fixpoint (an empty
     domain proves the horizon infeasible with no search), then aima's ``backtracking_search`` with
-    the configured variable order, value order and inference (AIMA 4th ed. §5.2-§5.3).
+    the configured variable order, value order and inference (AIMA 4th ed. §5.2.2 and §5.3).
 
     Parameters
     ----------
@@ -288,9 +292,8 @@ def solve_horizon(
         If ``horizon`` is negative.
     """
     csp = build_csp(problem, horizon)
-    tracer = _Tracer(trace)
     started = time.perf_counter()
-    status, assignment, ac3_removed = _search(csp, config, tracer, started + config.timeout_s)
+    status, assignment, ac3_removed = _search(csp, config, trace, started + config.timeout_s)
     stats = RunStats(
         assignments=csp.nassigns,
         checks=csp.nchecks,
@@ -344,7 +347,7 @@ def find_min_horizon(
 
 
 def ac3_domains(problem: TransitionProblem, horizon: int) -> tuple[bool, Domains]:
-    """Return the domains after node consistency and then aima's AC-3 (AIMA 4th ed. §5.2.1).
+    """Return the domains after node consistency and then aima's AC-3 (AIMA 4th ed. §5.2.2).
 
     Parameters
     ----------
@@ -366,7 +369,7 @@ def ac3_domains(problem: TransitionProblem, horizon: int) -> tuple[bool, Domains
         If ``horizon`` is negative.
     """
     csp = build_csp(problem, horizon)
-    consistent, _removed = _preprocess(csp, _Tracer(None))
+    consistent, _removed = _preprocess(csp, None)
     return consistent, {v: tuple(csp.curr_domains[v]) for v in csp.variables}
 
 
@@ -417,20 +420,20 @@ def solve_min_conflicts(
 
 
 def _search(
-    csp: Any, config: SolverConfig, tracer: _Tracer, deadline: float
+    csp: Any, config: SolverConfig, trace: list[TraceEvent] | None, deadline: float
 ) -> tuple[RunStatus, _Assignment | None, int]:
     """Run AC-3 (if configured), then aima's backtracking; return status, solution, removals."""
     ac3_removed = 0
     if config.ac3_preprocess:
-        consistent, ac3_removed = _preprocess(csp, tracer)
+        consistent, ac3_removed = _preprocess(csp, trace)
         if not consistent:
             return "infeasible", None, ac3_removed
     try:
         assignment = aima_csp.backtracking_search(
             csp,
-            select_unassigned_variable=_variable_selector(config, tracer, deadline),
-            order_domain_values=_value_orderer(config, tracer),
-            inference=_inference(config, tracer),
+            select_unassigned_variable=_variable_selector(config, trace, deadline),
+            order_domain_values=_value_orderer(config, trace),
+            inference=_inference(config, trace),
         )
     except SolverTimeoutError:
         return "timeout", None, ac3_removed
@@ -438,7 +441,7 @@ def _search(
         return "budget", None, ac3_removed
     if assignment is None:
         return "infeasible", None, ac3_removed
-    tracer.add("solution", None, None, f"all {len(assignment)} variables assigned")
+    _record(trace, "solution", None, None, f"all {len(assignment)} variables assigned")
     return "solved", assignment, ac3_removed
 
 
@@ -449,33 +452,26 @@ def _schedule(csp: Any, assignment: _Assignment | None) -> dict[Variable, Value]
     return {v: assignment[v] for v in csp.variables}
 
 
-class _Tracer:
-    """Appends :class:`TraceEvent` objects to a list (or does nothing without one).
-
-    ``offered`` is the (variable, value) the value order last handed to aima's search. aima only
-    calls the inference function for a value that passed the check against the assigned
-    neighbours, and the inference wrapper clears ``offered``; so if it is still set when the
-    search asks for the next value, that value was rejected by the check.
-    """
-
-    def __init__(self, events: list[TraceEvent] | None) -> None:
-        self.events = events
-        self.offered: tuple[Variable, Value] | None = None
-
-    def add(self, kind: TraceKind, variable: Variable | None, value: Value, detail: str) -> None:
-        """Append one event (if tracing)."""
-        if self.events is not None:
-            self.events.append(TraceEvent(len(self.events), kind, variable, value, detail))
+def _record(
+    trace: list[TraceEvent] | None,
+    kind: TraceKind,
+    variable: Variable | None,
+    value: Value,
+    detail: str,
+) -> None:
+    """Append one event to ``trace``; do nothing when the run is not traced."""
+    if trace is not None:
+        trace.append(TraceEvent(len(trace), kind, variable, value, detail))
 
 
-def _preprocess(csp: Any, tracer: _Tracer) -> tuple[bool, int]:
+def _preprocess(csp: Any, trace: list[TraceEvent] | None) -> tuple[bool, int]:
     """Run aima's AC-3 on the whole CSP; return whether it is consistent and the values removed."""
     removals: _Removals = []
     consistent, _checks = _ac3(csp, removals=removals)
     for variable, value in removals:
-        tracer.add("ac3", variable, value, "no support left in a neighbour's domain")
+        _record(trace, "ac3", variable, value, "no support left in a neighbour's domain")
     if not consistent:
-        tracer.add("wipeout", _emptied(csp), None, "AC-3 emptied this domain: no solution")
+        _record(trace, "wipeout", _emptied(csp), None, "AC-3 emptied this domain: no solution")
     return bool(consistent), len(removals)
 
 
@@ -517,7 +513,7 @@ class _AssignmentBudgetError(SolverError):
 
 
 def _variable_selector(
-    config: SolverConfig, tracer: _Tracer, deadline: float
+    config: SolverConfig, trace: list[TraceEvent] | None, deadline: float
 ) -> Callable[[_Assignment, Any], Variable]:
     """Return the variable-selection function of the configuration, with the timeout check."""
 
@@ -534,7 +530,7 @@ def _variable_selector(
             variable = _mrv(assignment, csp)
         else:
             variable = aima_csp.first_unassigned_variable(assignment, csp)
-        tracer.add("select", variable, None, f"{len(csp.choices(variable))} values left")
+        _record(trace, "select", variable, None, f"{len(csp.choices(variable))} values left")
         return variable
 
     return select
@@ -542,6 +538,8 @@ def _variable_selector(
 
 def _mrv(assignment: _Assignment, csp: Any) -> Variable:
     """Choose a variable as aima's ``mrv`` (``csp.py`` l.391) does, with ties in static order.
+
+    Minimum remaining values: AIMA 4th ed. §5.3.1 "Variable and value ordering".
 
     aima's version is ``argmin_random_tie(unassigned, key=num_legal_values)``; ``min`` with the same
     key returns the first minimum, and the unassigned variables are listed in static order.
@@ -551,24 +549,38 @@ def _mrv(assignment: _Assignment, csp: Any) -> Variable:
 
 
 def _value_orderer(
-    config: SolverConfig, tracer: _Tracer
+    config: SolverConfig, trace: list[TraceEvent] | None
 ) -> Callable[[Variable, _Assignment, Any], Iterator[Value]]:
-    """Return the value-order function of the configuration, which also traces each value."""
-    order = aima_csp.lcv if config.value_order == "lcv" else aima_csp.unordered_domain_values
+    """Return the value-order function of the configuration.
+
+    It hands aima's search the values one at a time; when they run out (aima's ``backtrack``
+    leaves its loop with no solution), it records the backtrack in the trace.
+    """
+    order = aima_csp.lcv if config.value_order == "lcv" else _keep_first
 
     def values(variable: Variable, assignment: _Assignment, csp: Any) -> Iterator[Value]:
-        for value in list(order(variable, assignment, csp)):
-            tracer.offered = (variable, value)
-            yield value
-            if tracer.offered == (variable, value):
-                tracer.add("try", variable, value, "rejected: conflicts with an assigned neighbour")
-            tracer.offered = None
-        tracer.add("backtrack", variable, None, "every value failed: undo and go back")
+        yield from order(variable, assignment, csp)
+        _record(trace, "backtrack", variable, None, "every value failed: undo and go back")
 
     return values
 
 
-def _inference(config: SolverConfig, tracer: _Tracer) -> _InferenceFunction:
+def _keep_first(variable: Variable, assignment: _Assignment, csp: Any) -> list[Value]:
+    """Return the current values of ``variable`` in keep-first order (design §6.1, v2.3).
+
+    A value-ordering heuristic in the sense of AIMA 4th ed. §5.3.1 "Variable and value ordering".
+
+    aima's ``unordered_domain_values`` (``csp.py`` l.410) returns ``csp.choices(var)`` as it is,
+    and its order drifts: on a backtrack ``restore`` (l.172) appends the restored values at the
+    end. Sorting by the position in the static domain, which ``csp_builder`` builds in keep-first
+    order, gives the same order on every visit.
+    """
+    del assignment  # aima's value-order signature passes it; the order does not depend on it
+    static: list[Value] = csp.domains[variable]
+    return sorted(csp.choices(variable), key=static.index)
+
+
+def _inference(config: SolverConfig, trace: list[TraceEvent] | None) -> _InferenceFunction:
     """Return the inference function of the configuration, which also traces its prunings."""
     infer: _InferenceFunction = {
         "none": aima_csp.no_inference,
@@ -579,14 +591,13 @@ def _inference(config: SolverConfig, tracer: _Tracer) -> _InferenceFunction:
     def traced(
         csp: Any, variable: Variable, value: Value, assignment: _Assignment, removals: _Removals
     ) -> bool:
-        tracer.offered = None
-        tracer.add("try", variable, value, "assigned")
+        _record(trace, "try", variable, value, "assigned")
         already_removed = len(removals)  # backtracking's suppose() put the other values there
         consistent = infer(csp, variable, value, assignment, removals)
         for pruned_variable, pruned_value in removals[already_removed:]:
-            tracer.add("prune", pruned_variable, pruned_value, f"inconsistent with {value}")
+            _record(trace, "prune", pruned_variable, pruned_value, f"inconsistent with {value}")
         if not consistent:
-            tracer.add("wipeout", _emptied(csp), None, "empty domain: try the next value")
+            _record(trace, "wipeout", _emptied(csp), None, "empty domain: try the next value")
         return bool(consistent)
 
     return traced

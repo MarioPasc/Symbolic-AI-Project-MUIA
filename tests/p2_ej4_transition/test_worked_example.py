@@ -57,7 +57,7 @@ def test_ac3_proves_horizon_11_infeasible_without_search(example: WorkedExample)
     assert (h11.run.status, h11.run.assignments, h11.run.checks, h11.run.ac3_removed) == (
         "infeasible",
         0,
-        1133,
+        1234,
         116,
     )
     assert h11.removed_by_ac3 == 116
@@ -84,7 +84,7 @@ def test_ac3_at_horizon_12_leaves_one_value_except_pain_day_12(example: WorkedEx
     assert (h12.run.status, h12.run.assignments, h12.run.checks, h12.run.ac3_removed) == (
         "solved",
         26,
-        2070,
+        2264,
         133,
     )
     assert h12.removed_by_ac3 == 133
