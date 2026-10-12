@@ -34,7 +34,7 @@ It calls each exercise's `--experiments` (the commands of the sections below) wi
 directories, prints what each exercise prints, and ends with a summary: exit code, wall time and
 results file per exercise. It keeps going if one exercise fails and then exits with code 1.
 Measured on a 24-core workstation with `--workers 12`: EJ1 9 s, EJ2 23 s, EJ3 88 s, about
-2 minutes in total. Every file is byte-identical for any `--workers` (only `provenance` records the
+2 minutes in total; EJ4 (one process) adds about 4 minutes. Every file is byte-identical for any `--workers` (only `provenance` records the
 git commit).
 
 Options: `--only ej1 ej3` runs a subset; `--out-root DIR` writes to `DIR/ej{1,2,3,4}` instead of
@@ -217,8 +217,8 @@ conda activate symai
 python -m symbolic_ai.p2_ej4_transition.main --worked-example        # R1 as text
 python -m symbolic_ai.p2_ej4_transition.main --list --category knock_on
 python -m symbolic_ai.p2_ej4_transition.main --problem 'DEP|LIVER|+cond:PAIN'
-python -m symbolic_ai.p2_ej4_transition.main --experiments           # R1, R2, R3 (about 65 s)
-python -m symbolic_ai.p2_ej4_transition.main --experiments --no-oracle   # R2 without the oracle
+python -m symbolic_ai.p2_ej4_transition.main --experiments           # R1, R2, R3 (about 4 min)
+python -m symbolic_ai.p2_ej4_transition.main --experiments --no-oracle   # no oracle, no synthetic batch
 
 # equivalently, the console script declared in pyproject.toml:
 symai-ej4 --worked-example
@@ -228,8 +228,8 @@ symai-ej4 --worked-example
 
 | file | content |
 |---|---|
-| `results.json` | schema `symai.ej4.results/1`, byte-identical across runs (no times): `r1` (the worked example `DEP|LIVER|+cond:PAIN`: data rows, domains before and after AC-3 at H = 11 and 12, the emptied domain, the trace and the schedule), `r2` (CSP against oracle and checker on the 3,723 distinct problems; targeted mutations per checker rule), `census`, `context` (H* counted in events), `r3` (plain BT, BT + FC, BT + FC + MRV and the main configuration at H* - 1 and H* on the worked example and on `DEP+GERD+HTN+PAIN+T2D|-|+rf:LIVER`, with a budget of 1,000,000 assignments; min-conflicts), `extended_case`, `provenance` |
-| `timings.json` | wall-clock time of each phase and each R3 run (machine-dependent) |
+| `results.json` | schema `symai.ej4.results/1`, byte-identical across runs (no times): `r1` (the worked example `DEP|LIVER|+cond:PAIN`: data rows, domains before and after AC-3 at H = 11 and 12, the emptied domain, the trace and the schedule); `r2` (CSP against oracle and checker on every distinct real problem, `three_way_agree`; targeted mutations per checker rule; `synthetic`: the same three-way agreement on `synthetic.random_problems(2027, 1500)` with its coverage and H* distribution; `continuity_with_ej3`: R₀ against P1's EJ3 regimen on the 4,032 histories, with the companion history ids; `categories`: each category against the solved H*); `census`; `context` (H* counted in events); `r3` (plain BT, BT + FC, BT + FC + MRV and the main configuration at H* - 1 and H* on the worked example and on `DEP+GERD+HTN+PAIN+T2D|-|+rf:LIVER`, with a budget of 1,000,000 assignments; min-conflicts; `knock_on_population`: the four configurations on every real knock-on problem at H* - 1 with a budget of 100,000 assignments, median and budget hits; `synthetic_row`: how often AC-3 alone refutes H* - 1 and how often the search backtracks at H* on the synthetic batch); `extended_case`; `provenance` |
+| `timings.json` | wall-clock time of each phase (R2 and its synthetic batch, the continuity run of about 55 s, the population row, R3) and each R3 run (machine-dependent) |
 | `fig_ej4_gantt.{pdf,png}`, `fig_ej4_gantt_extended.{pdf,png}` | the schedules as Gantt charts, sized for a 16:9 slide |
 | `tab_ej4_domains_h11.tex`, `tab_ej4_domains_h12.tex`, `tab_ej4_r2.tex`, `tab_ej4_r3.tex` | booktabs fragments to `\input` in the beamer slides (need `booktabs` and `xcolor`); the first line of the domain and R3 tables is the caption-ready legend |
 
