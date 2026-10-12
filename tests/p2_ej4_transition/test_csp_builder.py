@@ -14,6 +14,7 @@ from symbolic_ai.p2_ej4_transition import (
     ModelError,
     TransitionProblem,
     Value,
+    synthetic,
 )
 from symbolic_ai.p2_ej4_transition.csp_builder import (
     Variable,
@@ -184,6 +185,46 @@ SWITCH = TransitionProblem(
 )
 def test_transition_constraint(before: Value, after: Value, allowed: bool) -> None:
     assert transition_allowed(SWITCH, "X", before, after) is allowed
+
+
+def _compact_transition_allowed(
+    problem: TransitionProblem, condition: str, before: Value, after: Value
+) -> bool:
+    """The compact implementation of T merged in wave 1 (design v2.1), kept as the reference."""
+    if after is None:
+        return before is None
+    if before is not None:
+        drug, phase = before
+        if after == before and phase == 0:
+            return True
+        if after == (drug, phase + 1) and phase < problem.taper_days[drug]:
+            return True
+        if after[0] == drug or phase != problem.taper_days[drug]:
+            return False
+    return after[1] == 0 and after[0] in problem.acceptable[condition]
+
+
+def test_transition_rows_match_the_compact_implementation() -> None:
+    # Every ordered pair of values of every condition: the toys, the worked example and 200
+    # synthetic problems (same-condition interactions, contraindicated tapers, both events).
+    from test_solve import worked_example
+
+    problems = [k.problem for k in TOYS]
+    problems += [SWITCH, worked_example(), *synthetic.random_problems(seed=0, count=200)]
+    pairs = 0
+    for problem in problems:
+        for condition in problem.conditions:
+            values = condition_values(problem, condition)
+            for before, after in itertools.product(values, repeat=2):
+                expected = _compact_transition_allowed(problem, condition, before, after)
+                assert transition_allowed(problem, condition, before, after) is expected, (
+                    problem.problem_id,
+                    condition,
+                    before,
+                    after,
+                )
+                pairs += 1
+    assert pairs > 30_000
 
 
 @pytest.mark.parametrize("day", [1, 2, 3])

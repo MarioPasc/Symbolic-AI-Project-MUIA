@@ -148,11 +148,10 @@ def transition_allowed(
 ) -> bool:
     """Return whether constraint T allows ``before`` on day ``t - 1`` and ``after`` on day ``t``.
 
-    The allowed pairs (design §4.3, v2.1), for drugs ``d`` and ``e != d`` with ``e`` acceptable:
-    ``((d, 0), (d, 0))`` keep; ``((d, 0), (d, 1))`` start the taper (``taper_days[d] >= 1``);
-    ``((d, k), (d, k + 1))`` continue it; ``((d, taper_days[d]), (e, 0))`` switch after the whole
-    taper (with ``taper_days[d] = 0`` that is a switch from full dose); ``(None, None)`` wait and
-    ``(None, (e, 0))`` start a first drug. Nothing else: a treated condition is never left
+    One ``if`` per row of the table of T (design §4.3, v2.1), each labelled with the row's name:
+    the two rows of the untreated value first, then the five rows of a drug. ``d`` is the drug
+    given on day ``t - 1`` and ``e`` the drug given on day ``t``; every target ``e`` of a switch or
+    a start must be acceptable. Any other pair is forbidden: a treated condition is never left
     untreated, a taper is never aborted, no drug starts at a taper day, and a drug that is no
     longer acceptable (the old one, kept or tapered while it is withdrawn) is never started again.
 
@@ -172,18 +171,36 @@ def transition_allowed(
     bool
         ``True`` if the pair is allowed.
     """
-    if after is None:
-        return before is None
-    if before is not None:
-        drug, phase = before
-        if after == before and phase == 0:
-            return True
-        if after == (drug, phase + 1) and phase < problem.taper_days[drug]:
-            return True
-        if after[0] == drug or phase != problem.taper_days[drug]:
-            return False
-    # What remains is a start: a first drug, or a switch after the whole taper of the old one.
-    return is_full_dose(after) and after[0] in problem.acceptable[condition]
+    acceptable = problem.acceptable[condition]
+    # Row "stay untreated": (∅, ∅).
+    if before is None and after is None:
+        return True
+    # Row "start": (∅, e), e acceptable, at full dose.
+    if before is None and after is not None and after[1] == 0 and after[0] in acceptable:
+        return True
+    # No other row involves ∅: a treated condition never goes back to untreated.
+    if before is None or after is None:
+        return False
+    # The other rows have drug d on day t - 1 at phase k (0: full dose; k >= 1: taper day k).
+    d, k = before
+    e, j = after
+    tau = problem.taper_days[d]
+    # Row "keep": (d, d).
+    if k == 0 and after == before:
+        return True
+    # Row "switch at once": (d, e), e != d, if tau_d = 0, e acceptable.
+    if k == 0 and tau == 0 and j == 0 and e != d and e in acceptable:
+        return True
+    # Row "start the taper": (d, d taper 1), if tau_d >= 1.
+    if k == 0 and tau >= 1 and after == (d, 1):
+        return True
+    # Row "advance the taper": (d taper k, d taper k + 1), for k < tau_d.
+    if 1 <= k < tau and after == (d, k + 1):
+        return True
+    # Row "switch after the taper": (d taper tau_d, e), e != d, e acceptable.
+    if tau >= 1 and k == tau and j == 0 and e != d and e in acceptable:  # noqa: SIM103
+        return True
+    return False
 
 
 def interaction_forbids(
