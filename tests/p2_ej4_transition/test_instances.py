@@ -180,21 +180,33 @@ def test_cheapest_safe_regimen_applies_d23_on_the_history_conditions(
         (History(("A", "G"), ()), Event(RF, "S"), Category.TRIVIAL),
         # R_0 = a2; under S without G, a2 must go.
         (History(("A",), ()), Event(RF, "S"), Category.FORCED_ONLY),
-        # R_0 = a1 under S; the new condition G makes a2 acceptable again (judged on C1).
+        # R_0 = a1 under S; a newly diagnosed G is untreated until g starts, so it does not
+        # make a2 acceptable (D23, design v2.3): only the new condition changes.
         (History(("A",), ("S",)), Event(COND, "G"), Category.FORCED_ONLY),
     ],
 )
-def test_d23_is_judged_on_the_conditions_after_the_event(
+def test_d23_counts_only_conditions_treated_from_day_0(
     history: History, event: Event, category: Category
 ) -> None:
-    pk = {d: Pharmacokinetics(d, washout_days=1, taper_days=0) for d in ("a1", "a2", "g")}
-    entries = enumerate_problems(_companion_formulary(), _companion_costs(), pk)
-    entry = _entry_of(entries, history, event)
+    entry = _entry_of(_companion_entries(), history, event)
     assert entry.category is category
-    if event == Event(COND, "G"):
-        assert entry.problem is not None
-        assert entry.problem.acceptable["A"] == ("a1", "a2")
-        assert dict(entry.problem.start) == {"A": "a1", "G": None}
+
+
+def _companion_entries() -> tuple[ProblemEntry, ...]:
+    pk = {d: Pharmacokinetics(d, washout_days=1, taper_days=0) for d in ("a1", "a2", "g")}
+    return enumerate_problems(_companion_formulary(), _companion_costs(), pk)
+
+
+def test_d23_a_new_companion_condition_does_not_admit_the_coprescribed_drug() -> None:
+    # The shape of "new GERD under AGE65": a2 (ibuprofen) stays unacceptable after G (GERD).
+    entry = _entry_of(_companion_entries(), History(("A",), ("S",)), Event(COND, "G"))
+    assert entry.problem is not None
+    assert dict(entry.problem.start) == {"A": "a1", "G": None}
+    assert dict(entry.problem.acceptable) == {"A": ("a1",), "G": ("g",)}
+    # The same patient with G treated before S appears keeps a2 acceptable.
+    treated = _entry_of(_companion_entries(), History(("A", "G"), ()), Event(RF, "S"))
+    assert treated.problem is not None
+    assert treated.problem.acceptable["A"] == ("a1", "a2")
 
 
 # --- cheapest safe regimen ----------------------------------------------------------------------
@@ -395,11 +407,11 @@ def test_real_entries_per_category(real_entries: tuple[ProblemEntry, ...]) -> No
     counts = {category: 0 for category in Category}
     for entry in real_entries:
         counts[entry.category] += 1
-    assert len(real_entries) == 4143
+    assert len(real_entries) == 4207
     assert counts == {
         Category.REFER: 888,
         Category.TRIVIAL: 607,
-        Category.FORCED_ONLY: 2486,
+        Category.FORCED_ONLY: 2550,
         Category.KNOCK_ON: 162,
     }
 
@@ -457,6 +469,24 @@ def test_d23_on_the_real_data(
 
 
 @pytest.mark.integration
+def test_real_new_gerd_under_age65_keeps_ibuprofen_out(
+    real_data: tuple[Formulary, Mapping[str, DrugCost], Mapping[str, Pharmacokinetics]],
+) -> None:
+    # A newly diagnosed GERD is untreated until omeprazole starts, so A5 would fail on the days
+    # ibuprofen were given before it: ibuprofen is not acceptable (D23, design v2.3).
+    history, event = History(("PAIN",), ("AGE65",)), Event(COND, "GERD")
+    problem, _category = _transition_for(*real_data, history, event)
+    assert problem is not None
+    assert dict(problem.start) == {"GERD": None, "PAIN": "paracetamol"}
+    assert problem.acceptable["PAIN"] == ("paracetamol", "tramadol")
+    # GERD treated before AGE65 appears: ibuprofen stays acceptable.
+    history, event = History(("GERD", "PAIN"), ()), Event(RF, "AGE65")
+    problem, _category = _transition_for(*real_data, history, event)
+    assert problem is not None
+    assert problem.acceptable["PAIN"] == ("ibuprofen", "paracetamol", "tramadol")
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("history", "expected"),
     [
@@ -500,7 +530,7 @@ def test_case_study(
 
 # --- categories against the solved minimum horizon H* -------------------------------------------
 
-#: The fast suite solves one non-REFER entry in 16 (about 200 of 3255); the slow suite solves all.
+#: The fast suite solves one non-REFER entry in 16 (208 of 3319); the slow suite solves all.
 _HSTAR_STRIDE = 16
 
 
@@ -542,7 +572,7 @@ def test_real_categories_agree_with_h_star_on_a_subset(
     real_entries: tuple[ProblemEntry, ...],
 ) -> None:
     subset = _live(real_entries)[::_HSTAR_STRIDE]
-    assert len(subset) == 204
+    assert len(subset) == 208
     assert {e.category for e in subset} == set(Category) - {Category.REFER}
     for entry in subset:
         _check_category_against_h_star(entry)
@@ -554,6 +584,6 @@ def test_real_categories_agree_with_h_star_on_every_entry(
     real_entries: tuple[ProblemEntry, ...],
 ) -> None:
     live = _live(real_entries)
-    assert len(live) == 3255
+    assert len(live) == 3319
     for entry in live:
         _check_category_against_h_star(entry)

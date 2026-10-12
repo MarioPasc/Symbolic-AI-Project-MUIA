@@ -150,8 +150,10 @@ class _Tables:
     interactions: frozenset[frozenset[str]]
 
 
-#: The key of the acceptability cache: (condition, sorted risk factors, sorted conditions).
+#: The key of the acceptability cache: (condition, sorted risk factors, sorted treated conditions).
 _AcceptableKey: TypeAlias = tuple[str, tuple[str, ...], tuple[str, ...]]
+#: The key of the safe-regimen cache: (patient state, sorted conditions treated from day 0).
+_SafeKey: TypeAlias = tuple[_State, tuple[str, ...]]
 
 
 @dataclass(slots=True)
@@ -161,7 +163,7 @@ class _Enumeration:
     tables: _Tables
     costs: Mapping[str, int]
     acceptable: dict[_AcceptableKey, tuple[str, ...]] = field(default_factory=dict)
-    safe: dict[_State, tuple[_Regimen, ...]] = field(default_factory=dict)
+    safe: dict[_SafeKey, tuple[_Regimen, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,10 +198,14 @@ def _tables(formulary: Formulary) -> _Tables:
     )
 
 
-def _always_given(tables: _Tables, conditions: Iterable[str]) -> frozenset[str]:
-    """Return the drugs every regimen of these conditions gives: each one's only candidate."""
+def _always_given(tables: _Tables, treated: Iterable[str]) -> frozenset[str]:
+    """Return the drugs given on every day: the only candidate of a condition treated from day 0.
+
+    A treated condition is never left untreated and a single-candidate condition can never switch,
+    so its only candidate is given every day of the transition.
+    """
     given: set[str] = set()
-    for condition_id in conditions:
+    for condition_id in treated:
         if condition_id not in tables.candidates:
             raise InstanceError(f"unknown condition {condition_id!r}")
         if len(tables.candidates[condition_id]) == 1:
@@ -211,17 +217,17 @@ def _acceptable(
     tables: _Tables,
     condition_id: str,
     risk_factors: Iterable[str],
-    conditions: Iterable[str] = (),
+    treated: Iterable[str] = (),
 ) -> tuple[str, ...]:
     """``Acc_c``: the candidates of a condition that no present risk factor excludes (D23 exact).
 
     A candidate is excluded by a contraindication of a present factor, or when it needs a companion
-    under a present factor and no condition in ``conditions`` has that companion as its only
-    candidate (so the companion is not given by every regimen of one drug per condition).
+    under a present factor and no condition in ``treated`` (treated from day 0) has that companion
+    as its only candidate (so the companion is not given on every day of the transition).
     """
     if condition_id not in tables.candidates:
         raise InstanceError(f"unknown condition {condition_id!r}")
-    given = _always_given(tables, conditions)
+    given = _always_given(tables, treated)
     excluded: set[str] = set()
     for risk_factor in risk_factors:
         if risk_factor not in tables.contraindicated_by:
@@ -243,9 +249,11 @@ def acceptable_drugs(
     A candidate is excluded if a present risk factor contraindicates it. Design decision D23
     applies P1's co-prescription rule (axiom A5, ``coprescriptions.csv``) exactly within EJ4's
     one-drug-per-condition model: a drug that needs a companion ``k`` under a present risk factor
-    is acceptable iff some condition of the patient has ``k`` as its only candidate, so every
-    regimen gives ``k``. Today: ibuprofen under AGE65 is acceptable iff GERD (whose only candidate
-    is omeprazole) is among the conditions.
+    is acceptable iff some condition treated from day 0 has ``k`` as its only candidate, so ``k``
+    is given on every day of the transition and A5 holds on each day, not only on the last one
+    (design v2.3). Today: ibuprofen under AGE65 is acceptable iff GERD (whose only candidate is
+    omeprazole) is a condition of the history; a newly diagnosed GERD does not count, because it
+    is untreated until omeprazole starts.
 
     Parameters
     ----------
@@ -256,8 +264,9 @@ def acceptable_drugs(
     risk_factors
         The risk factors present.
     conditions
-        Every condition of the patient (``condition_id`` may or may not be listed); the default,
-        no condition, makes every co-prescribed drug unacceptable under its risk factor.
+        The conditions treated from day 0: the history's conditions, never the newly diagnosed
+        one (``condition_id`` may or may not be listed). The default, no condition, makes every
+        co-prescribed drug unacceptable under its risk factor.
 
     Returns
     -------
@@ -346,21 +355,26 @@ def cheapest_safe_regimen(
     return None if best is None else dict(zip(history.conditions, best, strict=True))
 
 
-def _cached_acceptable(run: _Enumeration, condition_id: str, state: _State) -> tuple[str, ...]:
-    """``Acc_c`` of one condition for a patient in ``state`` (sorted conditions, risk factors)."""
-    conditions, risk_factors = state
-    key = (condition_id, risk_factors, conditions)
+def _cached_acceptable(
+    run: _Enumeration, condition_id: str, risk_factors: tuple[str, ...], treated: tuple[str, ...]
+) -> tuple[str, ...]:
+    """``Acc_c`` of one condition under ``risk_factors``, with ``treated`` treated from day 0."""
+    key = (condition_id, risk_factors, treated)
     if key not in run.acceptable:
-        run.acceptable[key] = _acceptable(run.tables, condition_id, risk_factors, conditions)
+        run.acceptable[key] = _acceptable(run.tables, condition_id, risk_factors, treated)
     return run.acceptable[key]
 
 
-def _cached_safe(run: _Enumeration, state: _State) -> tuple[_Regimen, ...]:
-    if state not in run.safe:
-        conditions, _risk_factors = state
-        options = [_cached_acceptable(run, c, state) for c in conditions]
-        run.safe[state] = tuple(_safe_regimens(options, run.tables.interactions))
-    return run.safe[state]
+def _cached_safe(
+    run: _Enumeration, state: _State, treated: tuple[str, ...]
+) -> tuple[_Regimen, ...]:
+    """Return the safe regimens of ``state`` when ``treated`` are treated from day 0."""
+    key = (state, treated)
+    if key not in run.safe:
+        conditions, risk_factors = state
+        options = [_cached_acceptable(run, c, risk_factors, treated) for c in conditions]
+        run.safe[key] = tuple(_safe_regimens(options, run.tables.interactions))
+    return run.safe[key]
 
 
 def _state_after(history: History, event: Event) -> _State:
@@ -401,8 +415,10 @@ def _outcome(
     state = _state_after(history, event)
     conditions, risk_factors = state
     start = {c: start_regimen.get(c) for c in conditions}
-    acceptable = {c: _cached_acceptable(run, c, state) for c in conditions}
-    finals = _cached_safe(run, state)
+    # D23: only the history's conditions are treated from day 0, not a newly diagnosed one.
+    treated = history.conditions
+    acceptable = {c: _cached_acceptable(run, c, risk_factors, treated) for c in conditions}
+    finals = _cached_safe(run, state, treated)
     category = _classify(event, start, acceptable, finals, conditions)
     key: _CspKey = (
         conditions,
@@ -466,7 +482,8 @@ def _start_regimens(run: _Enumeration) -> Iterator[tuple[History, dict[str, str]
     """Every history with a safe regimen and its ``R_0``, in deterministic enumeration order."""
     for conditions in _subsets(run.tables.conditions, smallest=1):
         for risk_factors in _subsets(run.tables.risk_factors, smallest=0):
-            best = _cheapest(_cached_safe(run, (conditions, risk_factors)), run.costs)
+            state = (conditions, risk_factors)
+            best = _cheapest(_cached_safe(run, state, conditions), run.costs)
             if best is not None:
                 regimen = dict(zip(conditions, best, strict=True))
                 yield History(conditions, risk_factors), regimen
@@ -581,7 +598,8 @@ def _transition_for(
     """
     tables = _tables(formulary)
     run = _Enumeration(tables, _cost_table(tables, costs))
-    best = _cheapest(_cached_safe(run, (history.conditions, history.risk_factors)), run.costs)
+    state = (history.conditions, history.risk_factors)
+    best = _cheapest(_cached_safe(run, state, history.conditions), run.costs)
     if best is None:
         raise InstanceError(f"history {history} has no safe regimen to start from")
     regimen = dict(zip(history.conditions, best, strict=True))
