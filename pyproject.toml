@@ -30,6 +30,7 @@ owl = ["owlready2==0.51", "graphviz>=0.20"]
 symai-ej1 = "symbolic_ai.p1_ej1_logic.main:main"
 symai-ej2 = "symbolic_ai.p1_ej2_ontology.main:main"
 symai-ej3 = "symbolic_ai.p1_ej3_search.main:main"
+symai-ej4 = "symbolic_ai.p2_ej4_transition.main:main"
 symai-reproduce = "symbolic_ai.reproduce:main"
 
 [tool.setuptools.packages.find]
