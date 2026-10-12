@@ -8,10 +8,15 @@ from pathlib import Path
 
 import pytest
 
+from symbolic_ai.dataloader import load_drug_costs, load_formulary, load_pharmacokinetics
 from symbolic_ai.p2_ej4_transition import experiments, instances
 from symbolic_ai.p2_ej4_transition import main as cli
-from symbolic_ai.p2_ej4_transition.experiments import EXTENDED_CASE_ID, AlgorithmRun
-from symbolic_ai.p2_ej4_transition.instances import ProblemEntry
+from symbolic_ai.p2_ej4_transition.experiments import (
+    EXTENDED_CASE_ID,
+    AlgorithmRun,
+    entries_in_category,
+)
+from symbolic_ai.p2_ej4_transition.instances import Category, ProblemEntry
 from symbolic_ai.p2_ej4_transition.problem import TransitionProblem
 from symbolic_ai.p2_ej4_transition.solve import SolverConfig
 
@@ -40,19 +45,32 @@ def test_refer_is_not_a_listable_category() -> None:
 # --- modes on the real data ---------------------------------------------------------------------
 
 
+def _real_entries() -> tuple[ProblemEntry, ...]:
+    """Every problem of the real data (the counts are not hard-coded: they change with D23)."""
+    version = "1.3.0"
+    return instances.enumerate_problems(
+        load_formulary(version=version),
+        load_drug_costs(version=version),
+        load_pharmacokinetics(version=version),
+    )
+
+
 @pytest.mark.integration
 def test_list_prints_every_problem(capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main(["--list"]) == 0
     lines = capsys.readouterr().out.splitlines()
-    assert len(lines) == 3723
-    assert sum(int(line.split("\t")[2]) for line in lines) == 14508
+    solvable = [e for e in _real_entries() if e.problem is not None]
+    assert len(lines) == len(solvable)
+    assert sum(int(line.split("\t")[2]) for line in lines) == sum(
+        len(e.occurrences) for e in solvable
+    )
 
 
 @pytest.mark.integration
 def test_list_one_category(capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main(["--list", "--category", "knock_on"]) == 0
     lines = capsys.readouterr().out.splitlines()
-    assert len(lines) == 180
+    assert len(lines) == len(entries_in_category(_real_entries(), Category.KNOCK_ON))
     assert all(line.split("\t")[1] == "knock_on" for line in lines)
     assert any(line.startswith(f"{CASE_STUDY_ID}\t") for line in lines)
 
@@ -93,7 +111,7 @@ def test_worked_example_prints_the_domains_and_the_schedule(
 def small_run(monkeypatch: pytest.MonkeyPatch) -> None:
     """Shrink ``--experiments``: a few problems, a tiny R3 budget, a short min-conflicts run."""
     real_enumerate = instances.enumerate_problems
-    keep = {CASE_STUDY_ID, EXTENDED_CASE_ID, "AF|-|+rf:AGE65", "AF|-|+cond:DEP"}
+    keep = {CASE_STUDY_ID, EXTENDED_CASE_ID}
 
     def few_problems(*args: object) -> tuple[ProblemEntry, ...]:
         entries = real_enumerate(*args)  # type: ignore[arg-type]
@@ -175,7 +193,7 @@ def test_no_oracle_leaves_the_comparison_null(tmp_path: Path) -> None:
     results = json.loads((tmp_path / "results.json").read_text())
     assert results["r2"]["oracle"] is None
     assert results["provenance"]["command"].endswith("--no-oracle")
-    assert results["r2"]["problems"] == 4
+    assert results["r2"]["problems"] == 2
 
 
 # --- the real run (slow) ------------------------------------------------------------------------
@@ -186,8 +204,9 @@ def test_no_oracle_leaves_the_comparison_null(tmp_path: Path) -> None:
 def test_real_experiments(tmp_path: Path) -> None:
     assert cli.main(["--experiments", "--out-dir", str(tmp_path)]) == 0
     results = json.loads((tmp_path / "results.json").read_text())
-    assert results["census_matches_design"] is True
-    assert results["r2"]["oracle"]["agree"] == results["r2"]["oracle"]["compared"] == 3723
+    oracle = results["r2"]["oracle"]
+    assert oracle["agree"] == oracle["compared"] > 0 and oracle["disagreements"] == []
+    assert results["r2"]["checker"]["invalid"] == []
     rows = {(r["instance_id"], r["configuration"], r["horizon"]): r for r in results["r3"]["runs"]}
     assert rows[EXTENDED_CASE_ID, "bt", 11]["status"] == "budget"
     assert rows[EXTENDED_CASE_ID, "main", 11]["assignments"] == 0

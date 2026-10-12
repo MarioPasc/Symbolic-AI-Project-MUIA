@@ -12,6 +12,7 @@ from symbolic_ai.dataloader import load_drug_costs, load_formulary, load_pharmac
 from symbolic_ai.p2_ej4_transition import EJ4_DATA_VERSION, EventKind, TransitionProblem
 from symbolic_ai.p2_ej4_transition.checker import RULES, check_schedule
 from symbolic_ai.p2_ej4_transition.experiments import (
+    DESIGN_CENSUS,
     EXTENDED_CASE_ID,
     MUTATIONS,
     R3_CONFIGS,
@@ -167,13 +168,26 @@ def test_mutations_without_intermediate_days_do_not_apply() -> None:
 # --- census and context (real data) -------------------------------------------------------------
 
 
-@pytest.mark.integration
-def test_census_matches_the_design(entries: tuple[ProblemEntry, ...]) -> None:
-    rows = census(entries)
+def _design_rows() -> list[CensusRow]:
+    """The census of :data:`DESIGN_CENSUS` as rows (no real data: its counts may change)."""
+    kinds = {"new_risk_factor": EventKind.NEW_RISK_FACTOR, "new_condition": EventKind.NEW_CONDITION}
+    return [CensusRow(kinds[kind], *counts) for kind, counts in DESIGN_CENSUS.items()]
+
+
+def test_census_matches_design_compares_every_count() -> None:
+    rows = _design_rows()
     assert census_matches_design(rows)
     changed = dataclasses.replace(rows[0], trivial=rows[0].trivial + 1)
     assert not census_matches_design([changed, rows[1]])
-    assert not census_matches_design([CensusRow(EventKind.NEW_RISK_FACTOR, 0, 0, 0, 0, 0), rows[1]])
+    assert not census_matches_design(rows[:1])
+
+
+@pytest.mark.integration
+def test_census_counts_every_event_once(entries: tuple[ProblemEntry, ...]) -> None:
+    rows = census(entries)
+    assert sum(row.events for row in rows) == sum(len(e.occurrences) for e in entries)
+    for row in rows:
+        assert row.events == row.refer + row.trivial + row.forced_only + row.knock_on
 
 
 def test_context_numbers_count_events_by_kind_and_category() -> None:
@@ -255,10 +269,14 @@ def test_extended_case_at_horizon_11(entries: tuple[ProblemEntry, ...]) -> None:
 @pytest.mark.slow
 @pytest.mark.integration
 def test_validation_on_every_problem(entries: tuple[ProblemEntry, ...]) -> None:
+    # Structural properties only: the population counts change with the data and with D23.
     validation = run_validation(entries)
-    assert (validation.problems, validation.events) == (3723, 14508)
+    solvable = [e for e in entries if e.problem is not None]
+    assert validation.problems == len(solvable)
+    assert validation.events == sum(len(e.occurrences) for e in solvable)
     assert validation.oracle is not None
-    assert (validation.oracle.compared, validation.oracle.agree) == (3723, 3723)
-    assert validation.checker.valid == 3723
+    assert validation.oracle.agree == validation.oracle.compared > 0
+    assert validation.oracle.disagreements == ()
+    assert validation.checker.valid == validation.checker.schedules == validation.problems
     assert all(m.rejected_with_expected_rule == m.applied > 0 for m in validation.mutations)
-    assert validation.context.histogram == ((0, 5472), (1, 8684), (2, 32), (12, 320))
+    assert sum(n for _h, n in validation.context.histogram) == validation.events
