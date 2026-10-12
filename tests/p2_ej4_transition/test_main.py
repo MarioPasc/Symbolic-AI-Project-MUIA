@@ -14,9 +14,17 @@ from symbolic_ai.p2_ej4_transition import main as cli
 from symbolic_ai.p2_ej4_transition.experiments import (
     EXTENDED_CASE_ID,
     AlgorithmRun,
+    PopulationRow,
+    SolvedEntry,
+    SyntheticResult,
     entries_in_category,
 )
-from symbolic_ai.p2_ej4_transition.instances import Category, ProblemEntry
+from symbolic_ai.p2_ej4_transition.instances import (
+    Category,
+    ContinuityReport,
+    History,
+    ProblemEntry,
+)
 from symbolic_ai.p2_ej4_transition.problem import TransitionProblem
 from symbolic_ai.p2_ej4_transition.solve import SolverConfig
 
@@ -127,9 +135,24 @@ def small_run(monkeypatch: pytest.MonkeyPatch) -> None:
     ) -> tuple[AlgorithmRun, ...]:
         return experiments.run_algorithm_table(problems, tiny)
 
+    real_continuity = instances.continuity_with_ej3
+
+    def two_histories(*args: object, **kwargs: object) -> ContinuityReport:
+        histories = [History(("DEP",), ("LIVER",)), History(("PAIN",), ("AGE65", "EPI", "LIVER"))]
+        return real_continuity(*args, histories=histories)  # type: ignore[arg-type]
+
+    def small_synthetic() -> SyntheticResult:
+        return experiments.run_synthetic(seed=2026, count=20)
+
+    def small_population(solved: Sequence[SolvedEntry]) -> tuple[PopulationRow, ...]:
+        return experiments.run_knock_on_population(solved, budget=50)
+
     monkeypatch.setattr(cli, "enumerate_problems", few_problems)
     monkeypatch.setattr(cli, "run_algorithm_table", small_table)
     monkeypatch.setattr(cli, "MIN_CONFLICTS_STEPS", 100)
+    monkeypatch.setattr(cli, "continuity_with_ej3", two_histories)
+    monkeypatch.setattr(cli, "run_synthetic", small_synthetic)
+    monkeypatch.setattr(cli, "run_knock_on_population", small_population)
 
 
 def _keys(content: object) -> set[str]:
@@ -169,6 +192,30 @@ def test_experiments_write_identical_results_twice(tmp_path: Path) -> None:
         assert (tmp_path / "a" / name).is_file()
     timings = json.loads((tmp_path / "a" / "timings.json").read_text())
     assert {"r1_s", "r2_s", "r3_s", "total_s"} <= set(timings)
+    assert {"synthetic_s", "continuity_s", "population_s"} <= set(timings)
+
+
+@pytest.mark.integration
+@pytest.mark.usefixtures("small_run")
+def test_experiments_record_the_v2_3_rows(tmp_path: Path) -> None:
+    assert cli.main(["--experiments", "--out-dir", str(tmp_path)]) == 0
+    results = json.loads((tmp_path / "results.json").read_text())
+    r2, r3 = results["r2"], results["r3"]
+    assert r2["three_way_agree"] == r2["problems"] == 2
+    assert [c["category"] for c in r2["categories"]] == ["knock_on"]
+    assert r2["categories"][0]["agree"] == 2
+    synthetic = r2["synthetic"]
+    assert synthetic["three_way_agree"] == synthetic["count"] == 20
+    assert "backtracking" not in synthetic  # the effort fields belong to R3
+    assert set(r3["synthetic_row"]) >= {"ac3_decides_before", "with_h_star_minus_one", "seed"}
+    continuity = r2["continuity_with_ej3"]
+    assert (continuity["histories"], continuity["equal"]) == (2, 1)
+    assert continuity["companion"] == ["PAIN|AGE65+EPI+LIVER"]
+    population = r3["knock_on_population"]
+    assert [row["configuration"] for row in population] == ["bt", "bt_fc", "bt_fc_mrv", "main"]
+    assert all(row["entries"] == 2 and row["budget"] == 50 for row in population)
+    r3_table = (tmp_path / "tab_ej4_r3.tex").read_text(encoding="utf-8")
+    assert "Knock-on reales (2)" in r3_table and "Sintéticas (20)" in r3_table
 
 
 @pytest.mark.integration
@@ -194,6 +241,8 @@ def test_no_oracle_leaves_the_comparison_null(tmp_path: Path) -> None:
     assert results["r2"]["oracle"] is None
     assert results["provenance"]["command"].endswith("--no-oracle")
     assert results["r2"]["problems"] == 2
+    assert results["r2"]["synthetic"] is None and results["r3"]["synthetic_row"] is None
+    assert results["r2"]["three_way_agree"] is None
 
 
 # --- the real run (slow) ------------------------------------------------------------------------
@@ -207,6 +256,22 @@ def test_real_experiments(tmp_path: Path) -> None:
     oracle = results["r2"]["oracle"]
     assert oracle["agree"] == oracle["compared"] > 0 and oracle["disagreements"] == []
     assert results["r2"]["checker"]["invalid"] == []
+    assert results["r2"]["three_way_agree"] == results["r2"]["problems"]
     rows = {(r["instance_id"], r["configuration"], r["horizon"]): r for r in results["r3"]["runs"]}
     assert rows[EXTENDED_CASE_ID, "bt", 11]["status"] == "budget"
     assert rows[EXTENDED_CASE_ID, "main", 11]["assignments"] == 0
+    # continuity with EJ3 is a design claim (§5), so its counts are asserted exactly
+    continuity = results["r2"]["continuity_with_ej3"]
+    assert (
+        continuity["equal"],
+        len(continuity["different"]),
+        len(continuity["companion"]),
+        continuity["refer"],
+        len(continuity["unexpected"]),
+    ) == (2720, 0, 32, 1280, 0)
+    assert all(c["agree"] == c["entries"] for c in results["r2"]["categories"])
+    synthetic = results["r2"]["synthetic"]
+    assert synthetic["three_way_agree"] == synthetic["compared"] == synthetic["count"]
+    population = {row["configuration"]: row for row in results["r3"]["knock_on_population"]}
+    assert population["main"]["budget_hits"] == 0 and population["main"]["median_assignments"] == 0
+    assert results["r3"]["synthetic_row"]["ac3_decides_before"] > 0
