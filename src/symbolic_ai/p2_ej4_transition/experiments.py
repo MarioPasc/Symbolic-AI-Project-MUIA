@@ -84,10 +84,11 @@ logger = logging.getLogger(__name__)
 #: develops severe liver disease; the same knock-on mechanism as the worked example.
 EXTENDED_CASE_ID = "DEP+GERD+HTN+PAIN+T2D|-|+rf:LIVER"
 
-#: The census of design §5, per event kind: (events, refer, trivial, forced only, knock-on).
+#: The census of design §5 (v2.3, exact D23), per event kind: (events, refer, trivial, forced only,
+#: knock-on). Reproduced independently by the design's scratch census script.
 DESIGN_CENSUS: dict[str, tuple[int, int, int, int, int]] = {
-    "new_risk_factor": (8896, 1664, 5472, 1600, 160),
-    "new_condition": (8512, 1236, 0, 7084, 192),
+    "new_risk_factor": (8960, 1600, 5592, 1592, 176),
+    "new_condition": (8592, 1236, 0, 7132, 224),
 }
 
 #: R3's deterministic budget: a run stops after this many assignments (status ``budget``).
