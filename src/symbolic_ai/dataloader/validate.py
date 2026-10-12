@@ -18,6 +18,7 @@ from symbolic_ai.dataloader import (
     load_formulary,
     load_ontology,
     load_patients,
+    load_pharmacokinetics,
     validate_database,
 )
 
@@ -62,6 +63,7 @@ def _print_summary(data_dir: Path) -> None:
         f"{len(ontology.families)} families, {len(ontology.disjoint_sets)} disjoint sets"
     )
     print(f"drug_costs: {len(load_drug_costs(data_dir))}")
+    print(f"pharmacokinetics: {len(load_pharmacokinetics(data_dir))}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -85,6 +87,8 @@ def main(argv: list[str] | None = None) -> int:
         load_ontology(data_dir)
         # Loading the costs also checks that every drug has one.
         load_drug_costs(data_dir)
+        # Loading the pharmacokinetics also checks that every drug has one row.
+        load_pharmacokinetics(data_dir)
     except DatabaseValidationError as exc:
         print(f"FAILED: {len(exc.problems)} database problem(s):")
         for problem in exc.problems:

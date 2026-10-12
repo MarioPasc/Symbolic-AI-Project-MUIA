@@ -9,6 +9,9 @@ acyclic, and every disjoint set has at least two members and one consistent ``pa
 Since data 1.2.0 it also checks the drug costs of EJ3: no cost is negative. That every drug has a
 cost is checked when the costs are loaded (:func:`missing_drug_costs`), as for the memberships.
 
+Since data 1.3.0 it also checks the pharmacokinetics of EJ4: no washout or taper is negative. That
+every drug has one row is checked when the table is loaded (:func:`missing_pharmacokinetics`).
+
 Every check reads the raw (untyped) rows of every resource and returns the problems it finds
 instead of raising, so that :func:`collect_problems` reports every violation of the database in one
 pass, as the specification requires.
@@ -555,6 +558,51 @@ def missing_drug_costs(drug_ids: Iterable[str], costed_ids: Iterable[str]) -> tu
     return tuple(f"drug_costs: drug {drug_id!r} has no cost" for drug_id in missing)
 
 
+# --- pharmacokinetics (data 1.3.0, EJ4) --------------------------------------------------------
+
+_PHARMACOKINETICS = "pharmacokinetics"
+_PK_DAY_FIELDS = ("washout_days", "taper_days")
+
+
+def _check_pharmacokinetics(raw: RawTable) -> list[str]:
+    """``pharmacokinetics``: no washout or taper is negative (they count days of the transition)."""
+    problems: list[str] = []
+    for row in _rows(raw, _PHARMACOKINETICS):
+        for field_name in _PK_DAY_FIELDS:
+            days = _safe_int(row.get(field_name))
+            if days is not None and days < 0:
+                problems.append(
+                    f"pharmacokinetics[drug_id={row.get('drug_id')!r}]: {field_name} = {days} "
+                    "is negative"
+                )
+    return problems
+
+
+def missing_pharmacokinetics(drug_ids: Iterable[str], known_ids: Iterable[str]) -> tuple[str, ...]:
+    """Report every drug without a pharmacokinetic row, for ``load_pharmacokinetics``.
+
+    Checked when the table is loaded, not in :func:`collect_problems`, for the reason given in
+    :func:`missing_drug_costs`: a drug added in a later data version before its washout and taper
+    are known must not invalidate the database for the exercises that never read them.
+
+    Parameters
+    ----------
+    drug_ids : Iterable[str]
+        The drugs that need a row.
+    known_ids : Iterable[str]
+        The drugs that have one.
+
+    Returns
+    -------
+    tuple[str, ...]
+        One problem message per drug without a row, sorted by drug.
+    """
+    missing = sorted(set(drug_ids) - set(known_ids))
+    return tuple(
+        f"pharmacokinetics: drug {drug_id!r} has no washout and taper days" for drug_id in missing
+    )
+
+
 def _read_all_raw(data_dir: Path, package: DataPackage) -> RawTable:
     return {resource.name: read_raw_rows(data_dir, resource) for resource in package.resources}
 
@@ -596,4 +644,5 @@ def collect_problems(data_dir: Path) -> tuple[str, ...]:
     problems.extend(_check_age65_and_preg_consistency(raw))
     problems.extend(_check_ontology(raw))
     problems.extend(_check_drug_costs(raw))
+    problems.extend(_check_pharmacokinetics(raw))
     return tuple(problems)

@@ -3,6 +3,30 @@
 All notable changes to the course database are documented here, one entry per data version
 (semantic versioning: MINOR for additive changes, MAJOR only by explicit team decision).
 
+## 1.3.0 — 2026-10-12
+
+Additive: the pharmacokinetics for EJ4 of Práctica 2 (the safe transition between two regimens,
+a CSP indexed by day). No existing file or row changed. EJ1 stays pinned to 1.0.0, EJ2 to 1.1.0
+and EJ3 to 1.2.0, and each of those loads returns exactly what it returned before. Loads that
+take the default version (`load_formulary()`, `load_ontology()`, `load_drug_costs()`) return the
+same content, labelled 1.3.0.
+
+- **New table `formulary/pharmacokinetics.csv`** (resource `pharmacokinetics`, every row
+  `since = 1.3.0`): `drug_id`, `washout_days` (days the drug stays present after its last dose),
+  `taper_days` (days of reduced dose before it may be stopped; `0` = it can stop at once),
+  `source` (`illustrative (EJ4 design D24)`). 18 rows, one per drug.
+- Why: EJ4 needs to know how long a stopped drug keeps interacting and which drugs cannot be
+  stopped at once. The values are **illustrative, not clinical** (EJ4 design decision D24, adopted
+  provisionally): sertraline (washout 7, taper 4), mirtazapine (4, 3), bisoprolol (2, 3),
+  propranolol (1, 3) and tramadol (2, 2) need a taper; warfarin (5) and amlodipine (3) have the
+  longest washouts among the drugs that can stop at once.
+- **Access**: `load_pharmacokinetics(data_dir, version)`, a loader of its own that returns one
+  `Pharmacokinetics` per drug; `Formulary` has no new field.
+- **Validation** (`python -m symbolic_ai.dataloader.validate`): every `drug_id` is a drug and
+  appears once (foreign and primary key), both day counts are integers and none is negative. That
+  every drug has a row is checked by `load_pharmacokinetics`, not by the validation, as for the
+  costs; loading a version before 1.3.0 therefore fails with one problem per drug.
+
 ## 1.2.0 — 2026-10-09
 
 Additive: the drug costs for EJ3 (cost-aware search). No existing file or row changed; EJ1 stays

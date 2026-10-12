@@ -40,6 +40,7 @@ from symbolic_ai.dataloader.models import (
     Membership,
     OntologyData,
     Patient,
+    Pharmacokinetics,
     RiskFactor,
     RiskStatus,
     SubcategoryEdge,
@@ -67,6 +68,7 @@ __all__ = [
     "Membership",
     "OntologyData",
     "Patient",
+    "Pharmacokinetics",
     "RiskFactor",
     "RiskStatus",
     "SubcategoryEdge",
@@ -78,6 +80,7 @@ __all__ = [
     "load_formulary",
     "load_ontology",
     "load_patients",
+    "load_pharmacokinetics",
     "validate_database",
 ]
 
@@ -349,6 +352,55 @@ def load_drug_costs(
     if problems:
         raise DatabaseValidationError(problems)
     return {drug_id: costs[drug_id] for drug_id in sorted(costs)}
+
+
+def load_pharmacokinetics(
+    data_dir: Path | None = None, version: str | None = None
+) -> Mapping[str, Pharmacokinetics]:
+    """Load the washout and taper days of every drug as of ``version`` (default: the database one).
+
+    The pharmacokinetics are a table of their own (data 1.3.0, EJ4), not a field of
+    :class:`Formulary`, so that ``load_formulary`` returns exactly what it returned before for every
+    version. The values are illustrative (EJ4 design D24), not clinical ones.
+
+    Parameters
+    ----------
+    data_dir : Path | None
+        Database directory (default: :func:`default_data_dir`).
+    version : str | None
+        Data version; rows with ``since`` newer than it are left out.
+
+    Returns
+    -------
+    Mapping[str, Pharmacokinetics]
+        One row per drug of that version, keyed and sorted by ``drug_id``.
+
+    Raises
+    ------
+    DatabaseValidationError
+        If the database is invalid, or a drug of that version has no pharmacokinetic row (as for
+        every version before 1.3.0).
+    """
+    directory = _resolve_data_dir(data_dir)
+    validate_database(directory)
+    package = read_descriptor(directory)
+    version_text = version if version is not None else package.version
+    target_version = parse_semver(version_text)
+    rows = _versioned_rows(directory, package, "pharmacokinetics", target_version)
+    table = {
+        _as_str(row["drug_id"]): Pharmacokinetics(
+            drug_id=_as_str(row["drug_id"]),
+            washout_days=_as_int(row["washout_days"]),
+            taper_days=_as_int(row["taper_days"]),
+            source=_as_optional_str(row["source"]),
+        )
+        for row in rows
+    }
+    drugs = _drugs(directory, package, target_version)
+    problems = validation.missing_pharmacokinetics((d.drug_id for d in drugs), table)
+    if problems:
+        raise DatabaseValidationError(problems)
+    return {drug_id: table[drug_id] for drug_id in sorted(table)}
 
 
 def _categories(
