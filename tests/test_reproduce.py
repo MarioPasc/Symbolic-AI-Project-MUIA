@@ -42,7 +42,7 @@ def _fake_main(name: str, calls: Calls, exit_code: int) -> Callable[[Sequence[st
 
 @pytest.fixture
 def calls(monkeypatch: pytest.MonkeyPatch) -> Calls:
-    """Replace the three exercise mains by recorders that succeed."""
+    """Replace the four exercise mains by recorders that succeed."""
     recorded: Calls = []
     for name, module in _MODULES.items():
         monkeypatch.setattr(f"{module}.main", _fake_main(name, recorded, 0))
@@ -54,7 +54,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> Calls:
 
 def test_runs_every_exercise_in_order_with_experiments(calls: Calls, tmp_path: Path) -> None:
     assert main(["--out-root", str(tmp_path)]) == 0
-    assert [name for name, _ in calls] == ["ej1", "ej2", "ej3"]
+    assert [name for name, _ in calls] == ["ej1", "ej2", "ej3", "ej4"]
     for name, argv in calls:
         assert argv[:3] == ["--experiments", "--out-dir", str(tmp_path / name)]
         assert (tmp_path / name / "results.json").is_file()
@@ -66,7 +66,7 @@ def test_default_out_root_is_outputs(
     monkeypatch.chdir(tmp_path)
     assert main([]) == 0
     assert [_option(argv, "--out-dir") for _, argv in calls] == [
-        str(Path("outputs") / name) for name in ("ej1", "ej2", "ej3")
+        str(Path("outputs") / name) for name in ("ej1", "ej2", "ej3", "ej4")
     ]
 
 
@@ -76,6 +76,8 @@ def test_default_out_root_is_outputs(
         (["ej3"], ["ej3"]),
         (["ej3", "ej1"], ["ej1", "ej3"]),
         (["ej2", "ej2"], ["ej2"]),
+        (["ej4"], ["ej4"]),
+        (["ej4", "ej2"], ["ej2", "ej4"]),
     ],
 )
 def test_only_selects_and_keeps_the_report_order(
@@ -87,7 +89,7 @@ def test_only_selects_and_keeps_the_report_order(
 
 def test_unknown_only_value_is_an_argparse_error(calls: Calls) -> None:
     with pytest.raises(SystemExit) as excinfo:
-        main(["--only", "ej4"])
+        main(["--only", "ej5"])
     assert excinfo.value.code == 2
     assert calls == []
 
@@ -109,6 +111,7 @@ def test_workers_goes_to_ej1_and_ej3_only(calls: Calls, tmp_path: Path) -> None:
         "ej1": "7",
         "ej2": None,
         "ej3": "7",
+        "ej4": None,
     }
 
 
@@ -120,15 +123,16 @@ def test_no_workers_forwarded_by_default(calls: Calls, tmp_path: Path) -> None:
 def test_data_dir_goes_to_every_exercise(calls: Calls, tmp_path: Path) -> None:
     data = tmp_path / "db"
     assert main(["--data-dir", str(data), "--out-root", str(tmp_path)]) == 0
-    assert [_option(argv, "--data-dir") for _, argv in calls] == [str(data)] * 3
+    assert [_option(argv, "--data-dir") for _, argv in calls] == [str(data)] * 4
 
 
-def test_no_oracle_goes_to_ej2_only(calls: Calls, tmp_path: Path) -> None:
+def test_no_oracle_goes_to_ej2_and_ej4_only(calls: Calls, tmp_path: Path) -> None:
     assert main(["--no-oracle", "--out-root", str(tmp_path)]) == 0
     assert {name: "--no-oracle" in argv for name, argv in calls} == {
         "ej1": False,
         "ej2": True,
         "ej3": False,
+        "ej4": True,
     }
 
 
@@ -147,7 +151,7 @@ def test_a_failing_exercise_does_not_stop_the_others(
     for name, module in _MODULES.items():
         monkeypatch.setattr(f"{module}.main", _fake_main(name, recorded, 3 if name == "ej2" else 0))
     assert main(["--out-root", str(tmp_path)]) == 1
-    assert [name for name, _ in recorded] == ["ej1", "ej2", "ej3"]
+    assert [name for name, _ in recorded] == ["ej1", "ej2", "ej3", "ej4"]
     out = capsys.readouterr().out
     assert "FAILED: ej2" in out
     assert (tmp_path / "ej3" / "results.json").is_file()
@@ -165,7 +169,7 @@ def test_an_exception_counts_as_a_failure(
     assert (outcome.exit_code, outcome.results_path) == (1, None)
     assert outcome.error == "RuntimeError: no Java"
     assert main(["--out-root", str(tmp_path)]) == 1
-    assert [name for name, _ in calls] == ["ej1", "ej3"]
+    assert [name for name, _ in calls] == ["ej1", "ej3", "ej4"]
 
 
 @pytest.mark.parametrize(("code", "expected"), [(2, 2), (None, 0), ("bad", 1)])
@@ -253,6 +257,17 @@ def test_report_figure_names_match_the_exercise_plots() -> None:
 
 
 # --- the real run -------------------------------------------------------------------------------
+
+
+def test_ej4_is_registered_with_its_cli() -> None:
+    from symbolic_ai.p2_ej4_transition import main as ej4_main
+
+    spec = next(spec for spec in EXERCISES if spec.exercise is Exercise.EJ4)
+    assert spec.module == ej4_main.__name__
+    assert (spec.accepts_workers, spec.accepts_no_oracle) == (False, True)
+    options = {a for action in ej4_main.build_arg_parser()._actions for a in action.option_strings}
+    assert {"--experiments", "--out-dir", "--data-dir", "--no-oracle"} <= options
+    assert "--workers" not in options
 
 
 @pytest.mark.slow

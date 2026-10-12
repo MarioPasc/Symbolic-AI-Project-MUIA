@@ -1,9 +1,9 @@
-"""Run every experiment of the report, EJ1 then EJ2 then EJ3, with one command.
+"""Run every experiment of the practicals, EJ1, EJ2, EJ3 (P1) and EJ4 (P2), with one command.
 
 ``python -m symbolic_ai.reproduce`` (console script ``symai-reproduce``) calls the ``main`` of each
 exercise in this process with ``--experiments --out-dir <out-root>/ej<k>``, exactly as the
 per-exercise commands do, so every results file and figure lands where those commands write it
-(``outputs/ej1``, ``outputs/ej2``, ``outputs/ej3`` by default). It keeps going after a failure,
+(``outputs/ej1`` to ``outputs/ej4`` by default). It keeps going after a failure,
 prints one summary line per exercise and exits non-zero if any exercise failed. With
 ``--report-figures DIR`` it also copies the figure PDFs the report includes to the names the
 report's LaTeX source uses.
@@ -49,11 +49,12 @@ _RESULTS_FILE = "results.json"
 
 
 class Exercise(StrEnum):
-    """The exercises of Práctica 1, in the order they are run."""
+    """The exercises of Práctica 1 (EJ1-EJ3) and Práctica 2 (EJ4), in the order they are run."""
 
     EJ1 = "ej1"
     EJ2 = "ej2"
     EJ3 = "ej3"
+    EJ4 = "ej4"
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,12 +79,14 @@ class ExerciseSpec:
     accepts_no_oracle: bool
 
 
-#: The exercises, in the order they run (EJ2's CLI has no ``--workers``; only EJ2 has an oracle
-#: that needs Java).
+#: The exercises, in the order they run. EJ2's and EJ4's CLIs have no ``--workers``; EJ2's
+#: ``--no-oracle`` skips the HermiT oracle (it needs Java) and EJ4's skips the breadth-first
+#: oracle of its validation R2 (it only saves time).
 EXERCISES: tuple[ExerciseSpec, ...] = (
     ExerciseSpec(Exercise.EJ1, "symbolic_ai.p1_ej1_logic.main", True, False),
     ExerciseSpec(Exercise.EJ2, "symbolic_ai.p1_ej2_ontology.main", False, True),
     ExerciseSpec(Exercise.EJ3, "symbolic_ai.p1_ej3_search.main", True, False),
+    ExerciseSpec(Exercise.EJ4, "symbolic_ai.p2_ej4_transition.main", False, True),
 )
 
 
@@ -319,27 +322,27 @@ def build_arg_parser() -> argparse.ArgumentParser:
     Returns
     -------
     argparse.ArgumentParser
-        Parser for ``[--only {ej1,ej2,ej3} ...] [--workers N] [--out-root DIR]
+        Parser for ``[--only {ej1,ej2,ej3,ej4} ...] [--workers N] [--out-root DIR]
         [--data-dir PATH] [--no-oracle] [--report-figures DIR]``.
     """
     parser = argparse.ArgumentParser(
         prog="python -m symbolic_ai.reproduce",
-        description="Run the experiments of every exercise (EJ1, EJ2, EJ3) and write their "
+        description="Run the experiments of every exercise (EJ1, EJ2, EJ3, EJ4) and write their "
         "results and figures, as each exercise's --experiments does.",
     )
     parser.add_argument(
         "--only",
         nargs="+",
         choices=tuple(exercise.value for exercise in Exercise),
-        metavar="{ej1,ej2,ej3}",
-        help="Run only these exercises (always in the order EJ1, EJ2, EJ3). Default: all.",
+        metavar="{ej1,ej2,ej3,ej4}",
+        help="Run only these exercises (always in the order EJ1, EJ2, EJ3, EJ4). Default: all.",
     )
     parser.add_argument(
         "--workers",
         type=_positive_int,
         default=None,
-        help="Processes for EJ1 and EJ3 (EJ2 has no --workers). Default: each exercise's "
-        "default, 1. The results do not depend on it.",
+        help="Processes for EJ1 and EJ3 (EJ2 and EJ4 have no --workers). Default: each "
+        "exercise's default, 1. The results do not depend on it.",
     )
     parser.add_argument(
         "--out-root",
@@ -358,7 +361,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-oracle",
         action="store_true",
-        help="EJ2 only: skip the HermiT oracle (needs Java >= 11); its oracle fields are null.",
+        help="EJ2: skip the HermiT oracle (needs Java >= 11). EJ4: skip the breadth-first "
+        "oracle of its validation R2. Their oracle fields are null.",
     )
     parser.add_argument(
         "--report-figures",
