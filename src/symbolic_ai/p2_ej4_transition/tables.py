@@ -21,7 +21,14 @@ import re
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 
-from symbolic_ai.p2_ej4_transition.experiments import AlgorithmRun, ValidationResult
+from symbolic_ai.p2_ej4_transition.experiments import (
+    AlgorithmRun,
+    CategoryAgreement,
+    PopulationRow,
+    SyntheticResult,
+    ValidationResult,
+)
+from symbolic_ai.p2_ej4_transition.instances import ContinuityReport
 from symbolic_ai.p2_ej4_transition.problem import Value, drug_of
 from symbolic_ai.p2_ej4_transition.worked_example import DomainCell, HorizonDomains
 
@@ -85,24 +92,40 @@ LABELS_ES: Mapping[str, str] = MappingProxyType(
         "mutation.delete_key": "Borrar un día del calendario",
         "r2.check": "Comprobación",
         "r2.result": "Resultado",
-        "r2.problems": "Problemas distintos (eventos)",
-        "r2.oracle": "H* del CSP = H* del oráculo",
-        "r2.oracle_budget": "Oráculo sin terminar (presupuesto)",
-        "r2.oracle_skipped": "no ejecutado",
-        "r2.checker": "Calendarios válidos según el verificador",
         "r2.census": "Censo de eventos reproducido",
         "r2.yes": "sí",
         "r2.no": "no",
-        "r2.mutation": "Mutación",
-        "r2.expected_rule": "Regla esperada",
-        "r2.applied": "Aplicadas",
-        "r2.rejected": "Rechazadas con esa regla",
+        "r2.cases": "Casos",
+        "r2.real": "Reales: CSP = oráculo = verificador",
+        "r2.real_cases": "{problems} problemas ({events} eventos)",
+        "r2.real_no_oracle": "{valid}/{schedules} válidos (sin oráculo)",
+        "r2.synthetic": "Sintéticas (semilla {seed}): CSP = oráculo = verificador",
+        "r2.synthetic_cases": "{count} problemas, {impossible} sin transición",
+        "r2.mutations": "Mutaciones dirigidas ({rules} reglas), rechazadas con su regla",
+        "r2.mutations_cases": "{applied} mutantes",
+        "r2.continuity": "Continuidad con EJ3: R₀ = régimen de EJ3 (un fármaco por condición)",
+        "r2.continuity_cases": (
+            "{histories} historias; aparte, {companion} con acompañante, {refer} derivadas, "
+            "{unexpected} inesperadas"
+        ),
+        "r2.categories": "Categoría (trivial, forzado, knock-on) coherente con H*",
+        "r2.categories_cases": "{entries} problemas",
+        "r2.census_cases": "{events} eventos",
+        "r2.not_run": "no ejecutado",
         "r3.configuration": "Configuración",
         "r3.horizon": "H",
         "r3.assignments": "Asign.",
         "r3.checks": "Compr.",
         "r3.ac3": "Elim. AC-3",
         "r3.not_run": "---",
+        "r3.population": "Knock-on reales ({entries})",
+        "r3.population_header": "Mediana (agotan)",
+        "r3.population_cell": "{median} ({hits})",
+        "r3.synthetic": (
+            "Sintéticas ({count}): AC-3 decide H*\u22121 sin asignar en {decided}/{before}; la "
+            "búsqueda retrocede en H* en {backtracking}/{solved}; asign. en H*: mediana "
+            "{median}, máx. {max}."
+        ),
         "r3.worked": "Ejemplo resuelto",
         "r3.extended": "Caso extendido",
         "r3.legend": (
@@ -111,11 +134,22 @@ LABELS_ES: Mapping[str, str] = MappingProxyType(
             "asignaciones; Compr.: comprobaciones de restricciones; Elim. AC-3: valores "
             "eliminados por AC-3 antes de buscar. Presupuesto: {budget} asignaciones."
         ),
+        "r3.population_legend": (
+            " Knock-on reales: mediana de asignaciones de cada configuración en H* \u2212 1 sobre "
+            "todos los problemas knock-on, con un presupuesto de {budget} asignaciones; entre "
+            "paréntesis, cuántos lo agotan."
+        ),
     }
 )
 
 #: Unicode symbols of the labels and codes, and how pdfLaTeX writes them.
-_LATEX_SYMBOLS = {"↓": r"$\downarrow$", "∅": r"$\emptyset$", "*": "$^*$", "\u2212": "$-$"}
+_LATEX_SYMBOLS = {
+    "↓": r"$\downarrow$",
+    "∅": r"$\emptyset$",
+    "*": "$^*$",
+    "\u2212": "$-$",
+    "₀": "$_0$",
+}
 #: Characters LaTeX treats specially, escaped.
 _LATEX_SPECIAL = {
     "\\": r"\textbackslash{}",
@@ -330,9 +364,21 @@ def _latex_codes(text: str) -> str:
 
 
 def validation_table(
-    validation: ValidationResult, census_ok: bool, labels: Mapping[str, str] = LABELS_ES
+    validation: ValidationResult,
+    census_ok: bool,
+    labels: Mapping[str, str] = LABELS_ES,
+    *,
+    synthetic: SyntheticResult | None = None,
+    continuity: ContinuityReport | None = None,
+    categories: Sequence[CategoryAgreement] = (),
+    census_events: int | None = None,
 ) -> str:
-    """Return the R2 table: the validation summary, then the mutations per rule (design §7 R2).
+    """Return the R2 table: one row per check, sized for one 16:9 slide (design §7 R2).
+
+    Rows, in order: real instances (CSP, oracle and checker agree), synthetic instances (the same
+    three-way agreement), the targeted mutations aggregated over the rules (the per-rule
+    breakdown stays in ``results.json``), continuity with EJ3, categories against the solved
+    H*, and the census. A check that was not run is omitted, or says so.
 
     Parameters
     ----------
@@ -342,66 +388,142 @@ def validation_table(
         Whether the census equals design §5 (``experiments.census_matches_design``).
     labels
         The label dictionary.
+    synthetic
+        The result of ``experiments.run_synthetic``, or ``None`` if it was not run.
+    continuity
+        The result of ``instances.continuity_with_ej3``, or ``None`` if it was not run.
+    categories
+        The result of ``experiments.check_categories`` (empty: the row is omitted).
+    census_events
+        The events the census counts (``None``: the cell is left empty).
 
     Returns
     -------
     str
         A ``tabular`` fragment.
     """
-    oracle = validation.oracle
-    checker = validation.checker
-    summary = [
-        (labels["r2.problems"], f"{_int(validation.problems)} ({_int(validation.events)})"),
+    rows = [_real_row(validation, labels)]
+    rows.append(_synthetic_row(synthetic, labels))
+    applied = sum(m.applied for m in validation.mutations)
+    rows.append(
         (
-            labels["r2.oracle"],
-            labels["r2.oracle_skipped"]
-            if oracle is None
-            else f"{_int(oracle.agree)}/{_int(oracle.compared)}",
-        ),
-    ]
-    if oracle is not None:
-        summary.append((labels["r2.oracle_budget"], _int(oracle.budget_exhausted)))
-    summary += [
-        (labels["r2.checker"], f"{_int(checker.valid)}/{_int(checker.schedules)}"),
-        (labels["r2.census"], labels["r2.yes"] if census_ok else labels["r2.no"]),
-    ]
+            labels["r2.mutations"].format(rules=len(validation.mutations)),
+            labels["r2.mutations_cases"].format(applied=_plain(applied)),
+            _ratio(sum(m.rejected_with_expected_rule for m in validation.mutations), applied),
+        )
+    )
+    if continuity is not None:
+        rows.append(_continuity_row(continuity, labels))
+    if categories:
+        entries = sum(c.entries for c in categories)
+        rows.append(
+            (
+                labels["r2.categories"],
+                labels["r2.categories_cases"].format(entries=_plain(entries)),
+                _ratio(sum(c.agree for c in categories), entries),
+            )
+        )
+    events = (
+        ""
+        if census_events is None
+        else labels["r2.census_cases"].format(events=_plain(census_events))
+    )
+    rows.append((labels["r2.census"], events, labels["r2.yes"] if census_ok else labels["r2.no"]))
+    header = (labels["r2.check"], labels["r2.cases"], labels["r2.result"])
+    # p columns wrap long cells; \raggedright in them redefines \\, so rows end with
+    # \tabularnewline (no array package needed).
     lines = [
         _HEADER.rstrip("\n"),
         r"{\scriptsize",
-        r"\begin{tabular}{llrr}",
+        r"\begin{tabular}{p{5.4cm}p{5.0cm}r}",
         r"\toprule",
-        rf"\multicolumn{{2}}{{l}}{{{latex_text(labels['r2.check'])}}} & "
-        rf"\multicolumn{{2}}{{r}}{{{latex_text(labels['r2.result'])}}} \\",
+        " & ".join(latex_text(h) for h in header) + r" \tabularnewline",
         r"\midrule",
     ]
-    lines += [
-        rf"\multicolumn{{2}}{{l}}{{{latex_text(name)}}} & \multicolumn{{2}}{{r}}{{{value}}} \\"
-        for name, value in summary
-    ]
-    header = ("r2.mutation", "r2.expected_rule", "r2.applied", "r2.rejected")
-    lines += [r"\midrule", " & ".join(latex_text(labels[k]) for k in header) + r" \\", r"\midrule"]
-    for m in validation.mutations:
-        row = [
-            latex_text(labels.get(f"mutation.{m.name}", m.name)),
-            latex_text(labels.get(f"rule.{m.expected_rule}", m.expected_rule)),
-            _int(m.applied),
-            _int(m.rejected_with_expected_rule),
+    for name, cases, result in rows:
+        cells = [
+            r"\raggedright " + _thousands(latex_text(name)),
+            r"\raggedright " + _thousands(latex_text(cases)),
+            result,
         ]
-        lines.append(" & ".join(row) + r" \\")
+        lines.append(" & ".join(cells) + r" \tabularnewline")
     lines += [r"\bottomrule", r"\end{tabular}}", ""]
     return "\n".join(lines)
+
+
+def _real_row(validation: ValidationResult, labels: Mapping[str, str]) -> tuple[str, str, str]:
+    """Return the R2 row of the real instances (the result cell is already LaTeX)."""
+    cases = labels["r2.real_cases"].format(
+        problems=_plain(validation.problems), events=_plain(validation.events)
+    )
+    if validation.three_way_agree is None:
+        checker = validation.checker
+        text = labels["r2.real_no_oracle"].format(
+            valid=_plain(checker.valid), schedules=_plain(checker.schedules)
+        )
+        return labels["r2.real"], cases, _thousands(latex_text(text))
+    return labels["r2.real"], cases, _ratio(validation.three_way_agree, validation.problems)
+
+
+def _synthetic_row(
+    synthetic: SyntheticResult | None, labels: Mapping[str, str]
+) -> tuple[str, str, str]:
+    """Return the R2 row of the synthetic instances (the result cell is already LaTeX)."""
+    if synthetic is None:
+        name = labels["r2.synthetic"].format(seed="-")
+        return name, "", latex_text(labels["r2.not_run"])
+    impossible = dict(synthetic.oracle_statuses).get("impossible", 0)
+    cases = labels["r2.synthetic_cases"].format(
+        count=_plain(synthetic.count), impossible=_plain(impossible)
+    )
+    name = labels["r2.synthetic"].format(seed=synthetic.seed)
+    return name, cases, _ratio(synthetic.three_way_agree, synthetic.count)
+
+
+def _continuity_row(
+    continuity: ContinuityReport, labels: Mapping[str, str]
+) -> tuple[str, str, str]:
+    """Return the R2 row of the continuity with EJ3 (the result cell is already LaTeX).
+
+    The result is ``equal / (equal + different)``: the histories where EJ3 prescribes one drug per
+    condition; the companion, referral and unexpected histories are counted in the cases cell.
+    """
+    cases = labels["r2.continuity_cases"].format(
+        histories=_plain(continuity.histories),
+        companion=len(continuity.companion),
+        refer=_plain(continuity.refer),
+        unexpected=len(continuity.unexpected),
+    )
+    result = _ratio(continuity.equal, continuity.equal + len(continuity.different))
+    return labels["r2.continuity"], cases, result
+
+
+def _ratio(numerator: int, denominator: int) -> str:
+    """Return ``numerator/denominator`` with thin spaces between thousands (LaTeX)."""
+    return f"{_int(numerator)}/{_int(denominator)}"
+
+
+def _plain(number: int) -> str:
+    """Return an integer with commas between thousands, for :func:`_thousands` after escaping."""
+    return f"{number:,}"
 
 
 def algorithm_table(
     runs: Sequence[AlgorithmRun],
     instances: Sequence[tuple[str, str, int]],
     labels: Mapping[str, str] = LABELS_ES,
+    *,
+    population: Sequence[PopulationRow] = (),
+    synthetic: SyntheticResult | None = None,
 ) -> str:
     """Return the R3 table: configurations by horizon, one column group per instance (§7 R3).
 
     A run with the expected outcome (``infeasible`` at ``H* - 1``, ``solved`` at ``H*``) shows its
     assignments, checks and AC-3 removals; any other outcome shows its assignments and then its
-    status in words (``presupuesto agotado`` for the budget) across the other two columns.
+    status in words (``presupuesto agotado`` for the budget) across the other two columns. The two
+    summary rows of design §7 R3 are a last column (the real knock-on population at ``H* - 1``:
+    median assignments and budget hits, on each configuration's first row) and a last row (the
+    synthetic batch).
 
     Parameters
     ----------
@@ -411,6 +533,10 @@ def algorithm_table(
         ``(problem_id, title, H*)`` per column group, in order.
     labels
         The label dictionary.
+    population
+        The rows of ``experiments.run_knock_on_population`` (empty: no population column).
+    synthetic
+        The result of ``experiments.run_synthetic`` (``None``: no synthetic row).
 
     Returns
     -------
@@ -418,39 +544,80 @@ def algorithm_table(
         A ``tabular`` fragment.
     """
     by_key = {(r.instance_id, r.configuration, r.horizon): r for r in runs}
+    by_config = {row.configuration: row for row in population}
     configurations = list(dict.fromkeys(r.configuration for r in runs))
     horizons = sorted({h for _id, _title, h_star in instances for h in (h_star - 1, h_star)})
+    extra = 1 if population else 0
+    columns = 2 + 3 * len(instances) + extra
+    titles = [rf"\multicolumn{{3}}{{c}}{{{latex_text(t)}}}" for _i, t, _h in instances]
+    rules = [rf"\cmidrule(lr){{{3 + 3 * k}-{5 + 3 * k}}}" for k in range(len(instances))]
+    names = [
+        latex_text(labels[k])
+        for k in (
+            "r3.configuration",
+            "r3.horizon",
+            *(("r3.assignments", "r3.checks", "r3.ac3") * len(instances)),
+        )
+    ]
+    if population:
+        titles.append(latex_text(labels["r3.population"].format(entries=population[0].entries)))
+        rules.append(rf"\cmidrule(lr){{{columns}-{columns}}}")
+        names.append(latex_text(labels["r3.population_header"]))
     lines = [
         _HEADER.rstrip("\n"),
         r"{\scriptsize\setlength{\tabcolsep}{3pt}%",
-        r"\begin{tabular}{lr" + "rrr" * len(instances) + "}",
+        r"\begin{tabular}{lr" + "rrr" * len(instances) + "r" * extra + "}",
         r"\toprule",
-        " & ".join(
-            ["", "", *(rf"\multicolumn{{3}}{{c}}{{{latex_text(t)}}}" for _i, t, _h in instances)]
-        )
-        + r" \\",
-        " ".join(rf"\cmidrule(lr){{{3 + 3 * k}-{5 + 3 * k}}}" for k in range(len(instances))),
-        " & ".join(
-            latex_text(labels[k])
-            for k in (
-                "r3.configuration",
-                "r3.horizon",
-                *(("r3.assignments", "r3.checks", "r3.ac3") * len(instances)),
-            )
-        )
-        + r" \\",
+        " & ".join(["", "", *titles]) + r" \\",
+        " ".join(rules),
+        " & ".join(names) + r" \\",
         r"\midrule",
     ]
     for configuration in configurations:
         name = latex_text(labels.get(f"config.{configuration}", configuration))
         for index, horizon in enumerate(horizons):
-            groups = [
+            cells = [name if index == 0 else "", str(horizon)]
+            cells += [
                 _algorithm_cells(by_key.get((problem_id, configuration, horizon)), h_star, labels)
                 for problem_id, _title, h_star in instances
             ]
-            lines.append(" & ".join([name if index == 0 else "", str(horizon), *groups]) + r" \\")
+            if population:
+                row = by_config.get(configuration)
+                cells.append(_population_cell(row, labels) if index == 0 else "")
+            lines.append(" & ".join(cells) + r" \\")
+    if synthetic is not None:
+        text = _thousands(latex_text(_synthetic_text(synthetic, labels)))
+        lines += [r"\midrule", rf"\multicolumn{{{columns}}}{{p{{12cm}}}}{{{text}}} \\"]
     lines += [r"\bottomrule", r"\end{tabular}}", ""]
     return "\n".join(lines)
+
+
+def _population_cell(row: PopulationRow | None, labels: Mapping[str, str]) -> str:
+    """Return the population cell of one configuration (``---`` when it was not run)."""
+    if row is None:
+        return latex_text(labels["r3.not_run"])
+    text = labels["r3.population_cell"].format(
+        median=_number(row.median_assignments), hits=row.budget_hits
+    )
+    return _thousands(latex_text(text))
+
+
+def _synthetic_text(synthetic: SyntheticResult, labels: Mapping[str, str]) -> str:
+    """Return the synthetic row of the R3 table, in words."""
+    return labels["r3.synthetic"].format(
+        count=f"{synthetic.count:,}",
+        decided=synthetic.ac3_decides_before,
+        before=synthetic.with_h_star_minus_one,
+        backtracking=len(synthetic.backtracking),
+        solved=synthetic.solved,
+        median=_number(synthetic.median_assignments),
+        max=f"{synthetic.max_assignments:,}",
+    )
+
+
+def _number(value: float) -> str:
+    """Return a median as an integer when it is one, else with one decimal (commas: thousands)."""
+    return f"{int(value):,}" if value == int(value) else f"{value:,.1f}"
 
 
 def _algorithm_cells(run: AlgorithmRun | None, h_star: int, labels: Mapping[str, str]) -> str:
@@ -464,7 +631,12 @@ def _algorithm_cells(run: AlgorithmRun | None, h_star: int, labels: Mapping[str,
     return rf"{_int(run.assignments)} & \multicolumn{{2}}{{l}}{{{status}}}"
 
 
-def algorithm_legend(h_star: int, budget: int, labels: Mapping[str, str] = LABELS_ES) -> str:
+def algorithm_legend(
+    h_star: int,
+    budget: int,
+    labels: Mapping[str, str] = LABELS_ES,
+    population_budget: int | None = None,
+) -> str:
     """Return the caption-ready legend of the R3 table (LaTeX).
 
     Parameters
@@ -475,6 +647,8 @@ def algorithm_legend(h_star: int, budget: int, labels: Mapping[str, str] = LABEL
         The assignment budget of each run.
     labels
         The label dictionary.
+    population_budget
+        The budget of the knock-on population column, if the table has one.
 
     Returns
     -------
@@ -482,6 +656,8 @@ def algorithm_legend(h_star: int, budget: int, labels: Mapping[str, str] = LABEL
         The legend.
     """
     text = labels["r3.legend"].format(before=h_star - 1, h=h_star, budget=f"{budget:,}")
+    if population_budget is not None:
+        text += labels["r3.population_legend"].format(budget=f"{population_budget:,}")
     return _thousands(latex_text(text))
 
 

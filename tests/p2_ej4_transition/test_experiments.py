@@ -16,7 +16,9 @@ from symbolic_ai.p2_ej4_transition.experiments import (
     EXTENDED_CASE_ID,
     MUTATIONS,
     R3_CONFIGS,
+    SolvedEntry,
     census_matches_design,
+    check_categories,
     context_numbers,
     entries_in_category,
     find_entry,
@@ -28,8 +30,11 @@ from symbolic_ai.p2_ej4_transition.experiments import (
     mutate_start_early,
     mutate_untreated_day,
     run_algorithm_table,
+    run_knock_on_population,
     run_min_conflicts_rows,
+    run_synthetic,
     run_validation,
+    solve_entries,
 )
 from symbolic_ai.p2_ej4_transition.instances import (
     Category,
@@ -278,5 +283,94 @@ def test_validation_on_every_problem(entries: tuple[ProblemEntry, ...]) -> None:
     assert validation.oracle.agree == validation.oracle.compared > 0
     assert validation.oracle.disagreements == ()
     assert validation.checker.valid == validation.checker.schedules == validation.problems
+    assert validation.three_way_agree == validation.problems
     assert all(m.rejected_with_expected_rule == m.applied > 0 for m in validation.mutations)
     assert sum(n for _h, n in validation.context.histogram) == validation.events
+
+
+@pytest.mark.slow
+def test_synthetic_slow_batch_three_way_agreement() -> None:
+    result = run_synthetic()  # seed 2027, 1500 problems, h_max 20 (design §7 R2)
+    _assert_synthetic_structure(result)
+    assert result.three_way_agree == result.compared == result.count == 1500
+
+
+# --- design v2.3 rows: categories, synthetic batch, knock-on population ------------------------
+
+
+@pytest.mark.integration
+def test_every_real_category_agrees_with_its_h_star(entries: tuple[ProblemEntry, ...]) -> None:
+    solved = solve_entries(entries)
+    rows = check_categories(solved)
+    assert [r.category for r in rows] == ["trivial", "forced_only", "knock_on"]
+    assert sum(r.entries for r in rows) == len(solved)
+    for row in rows:
+        assert row.agree == row.entries and row.disagreements == ()
+        assert sum(n for _h, n in row.h_stars) == row.entries
+    trivial = rows[0]
+    assert trivial.h_stars == ((0, trivial.entries),)
+    assert all(h is not None and h >= 1 for r in rows[1:] for h, _n in r.h_stars)
+
+
+def test_a_category_that_contradicts_h_star_is_reported() -> None:
+    problem = ej4_toys.T1.problem  # H* = 1, so it cannot be trivial
+    occurrences = ((History(("X",), ()), problem.event),)
+    trivial = ProblemEntry(problem, Category.TRIVIAL, occurrences)
+    knock_on = ProblemEntry(problem, Category.KNOCK_ON, occurrences)  # x1 is not acceptable
+    solved = [SolvedEntry(e, problem, find_min_horizon(problem)) for e in (trivial, knock_on)]
+    rows = {r.category: r for r in check_categories(solved)}
+    assert (rows["trivial"].agree, rows["trivial"].disagreements) == (0, (problem.problem_id,))
+    assert (rows["knock_on"].agree, rows["knock_on"].disagreements) == (0, (problem.problem_id,))
+
+
+def test_validation_counts_the_three_way_agreement() -> None:
+    entries = [_toy_entry(t) for t in ej4_toys.KNOWN_ANSWERS]
+    assert run_validation(entries).three_way_agree == 7
+    assert run_validation(entries, use_oracle=False).three_way_agree is None
+    solved = solve_entries(entries)
+    shared = run_validation(entries, solved_entries=solved)
+    assert shared == run_validation(entries)
+
+
+def _assert_synthetic_structure(result: object) -> None:
+    """Structural properties of a synthetic run (no hard-coded population counts)."""
+    from symbolic_ai.p2_ej4_transition.experiments import SyntheticResult
+
+    assert isinstance(result, SyntheticResult)
+    assert result.coverage.problems == result.count
+    assert sum(n for _s, n in result.oracle_statuses) == result.count
+    assert sum(n for _h, n in result.h_star_histogram) == result.count
+    assert result.agree == result.compared and result.disagreements == ()
+    assert result.checker_valid == result.checker_schedules == result.solved
+    assert result.ac3_decides_before <= result.with_h_star_minus_one <= result.solved
+    assert set(result.backtracking) <= {f"S{i:04d}" for i in range(result.count)}
+    assert result.median_assignments <= result.max_assignments
+
+
+def test_small_synthetic_batch_agrees_and_is_deterministic() -> None:
+    first = run_synthetic(seed=2026, count=40)
+    _assert_synthetic_structure(first)
+    assert first.three_way_agree == first.count == 40
+    assert run_synthetic(seed=2026, count=40) == first
+
+
+@pytest.mark.integration
+def test_knock_on_population_row(entries: tuple[ProblemEntry, ...]) -> None:
+    solved = solve_entries(entries)
+    knock_on = [s for s in solved if s.entry.category is Category.KNOCK_ON]
+    rows = run_knock_on_population(solved, budget=200)  # a small budget keeps it fast
+    assert [r.configuration for r in rows] == [key for key, _c in R3_CONFIGS]
+    for row in rows:
+        assert row.entries == len(knock_on) and row.budget == 200
+        assert sum(n for _s, n in row.statuses) == row.entries
+        assert row.budget_hits == dict(row.statuses).get("budget", 0)
+        # the budget is checked when the next variable is chosen, so a stopped run may overshoot
+        assert (row.max_assignments > row.budget) == (row.budget_hits > 0)
+        assert "seconds" not in row.to_dict()
+    main = rows[-1]
+    # AC-3 alone refutes H* - 1 on every real knock-on problem
+    assert (main.median_assignments, main.budget_hits, main.statuses) == (
+        0.0,
+        0,
+        (("infeasible", main.entries),),
+    )

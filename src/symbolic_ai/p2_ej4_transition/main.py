@@ -25,6 +25,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import symbolic_ai
@@ -37,6 +38,7 @@ from symbolic_ai.dataloader import (
     load_pharmacokinetics,
 )
 from symbolic_ai.p1_ej1_logic.solver import AIMA_PYTHON_COMMIT
+from symbolic_ai.p1_ej3_search import EJ3_DATA_VERSION
 from symbolic_ai.p2_ej4_transition import EJ4_DATA_VERSION, EJ4Error, TransitionProblem
 from symbolic_ai.p2_ej4_transition.experiments import (
     EXTENDED_CASE_ID,
@@ -44,20 +46,30 @@ from symbolic_ai.p2_ej4_transition.experiments import (
     R3_CONFIGS,
     R3_TIMEOUT_S,
     AlgorithmRun,
+    CategoryAgreement,
+    PopulationRow,
+    SolvedEntry,
+    SyntheticResult,
     ValidationResult,
     census_matches_design,
+    check_categories,
     entries_in_category,
     find_entry,
     run_algorithm_table,
+    run_knock_on_population,
     run_min_conflicts_rows,
+    run_synthetic,
     run_validation,
+    solve_entries,
 )
 from symbolic_ai.p2_ej4_transition.instances import (
     Category,
     CensusRow,
+    ContinuityReport,
     ProblemEntry,
     case_study_problem,
     census,
+    continuity_with_ej3,
     enumerate_problems,
 )
 from symbolic_ai.p2_ej4_transition.plot import GANTT_EXTENDED_FIGURE, GANTT_FIGURE, save_gantt
@@ -97,6 +109,26 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 #: Label keys of the titles of the two instances of R3 (column groups of its table).
 _R3_TITLES = ("r3.worked", "r3.extended")
 _LISTABLE = tuple(c.value for c in Category if c is not Category.REFER)
+#: The fields of ``SyntheticResult`` that make R3's synthetic row; the others belong to R2.
+_SYNTHETIC_R3_FIELDS = (
+    "with_h_star_minus_one",
+    "ac3_decides_before",
+    "solved",
+    "backtracking",
+    "median_assignments",
+    "max_assignments",
+    "max_assignments_id",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _Extensions:
+    """The R2 and R3 rows added by design v2.3, computed once and written in several places."""
+
+    categories: tuple[CategoryAgreement, ...]
+    synthetic: SyntheticResult | None
+    continuity: ContinuityReport
+    population: tuple[PopulationRow, ...]
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -147,7 +179,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-oracle",
         action="store_true",
-        help="With --experiments: skip the oracle in R2 (faster; its comparison is null).",
+        help="With --experiments: skip the oracle in R2 and the synthetic batch of R2/R3 "
+        "(faster; their fields are null).",
     )
     return parser
 
@@ -248,6 +281,36 @@ def _print_validation(validation: ValidationResult, census_ok: bool) -> None:
     print(f"context: H* -> events {{{histogram}}}")
 
 
+def _print_extensions(extensions: _Extensions) -> None:
+    """Print the headline numbers of the R2 and R3 rows of design v2.3."""
+    for c in extensions.categories:
+        print(f"R2 category {c.category}: agree {c.agree}/{c.entries}, H* {dict(c.h_stars)}")
+    s = extensions.synthetic
+    if s is None:
+        print("R2 synthetic: skipped (--no-oracle)")
+    else:
+        print(
+            f"R2 synthetic (seed {s.seed}, {s.count}): CSP = oracle = checker on "
+            f"{s.three_way_agree}/{s.count}; oracle {dict(s.oracle_statuses)}"
+        )
+        print(
+            f"R3 synthetic: AC-3 decides H*-1 in {s.ac3_decides_before}/{s.with_h_star_minus_one}; "
+            f"backtracks at H* in {len(s.backtracking)}/{s.solved}; assignments at H* median "
+            f"{s.median_assignments}, max {s.max_assignments} ({s.max_assignments_id})"
+        )
+    report = extensions.continuity
+    print(
+        f"R2 continuity with EJ3 ({report.histories} histories): equal {report.equal}, "
+        f"different {len(report.different)}, companion {len(report.companion)}, refer "
+        f"{report.refer}, unexpected {len(report.unexpected)}"
+    )
+    for row in extensions.population:
+        print(
+            f"R3 knock-on population {row.configuration} ({row.entries} at H*-1, budget "
+            f"{row.budget}): median {row.median_assignments}, budget hits {row.budget_hits}"
+        )
+
+
 def _print_algorithm_table(runs: Sequence[AlgorithmRun]) -> None:
     """Print the rows of R3."""
     for r in runs:
@@ -326,7 +389,8 @@ def _write_tables(
     out_dir: Path,
     example: WorkedExample,
     validation: ValidationResult,
-    census_ok: bool,
+    census_rows: Sequence[CensusRow],
+    extensions: _Extensions,
     r3_runs: Sequence[AlgorithmRun],
     r3_instances: Sequence[tuple[str, str, int]],
     names: Mapping[str, str],
@@ -342,13 +406,78 @@ def _write_tables(
         path.write_text(f"% Leyenda: {legend}\n{table}", encoding="utf-8")
         written.append(path)
     path = out_dir / "tab_ej4_r2.tex"
-    path.write_text(validation_table(validation, census_ok), encoding="utf-8")
+    r2_table = validation_table(
+        validation,
+        census_matches_design(census_rows),
+        synthetic=extensions.synthetic,
+        continuity=extensions.continuity,
+        categories=extensions.categories,
+        census_events=sum(row.events for row in census_rows),
+    )
+    path.write_text(r2_table, encoding="utf-8")
     written.append(path)
     path = out_dir / "tab_ej4_r3.tex"
-    legend = algorithm_legend(example.h_star, R3_BUDGET)
-    path.write_text(f"% Leyenda: {legend}\n{algorithm_table(r3_runs, r3_instances)}", "utf-8")
+    population_budget = extensions.population[0].budget if extensions.population else None
+    legend = algorithm_legend(example.h_star, R3_BUDGET, population_budget=population_budget)
+    r3_table = algorithm_table(
+        r3_runs, r3_instances, population=extensions.population, synthetic=extensions.synthetic
+    )
+    path.write_text(f"% Leyenda: {legend}\n{r3_table}", "utf-8")
     written.append(path)
     return written
+
+
+def _load_ej3(data_dir: Path | None) -> tuple[Formulary, dict[str, int]]:
+    """Load the formulary and the costs exactly as EJ3's CLI does (data 1.2.0)."""
+    formulary = load_formulary(data_dir=data_dir, version=EJ3_DATA_VERSION)
+    priced = load_drug_costs(data_dir=data_dir, version=EJ3_DATA_VERSION)
+    return formulary, {drug_id: cost.monthly_cost_cents for drug_id, cost in priced.items()}
+
+
+def _run_extensions(
+    args: argparse.Namespace,
+    formulary: Formulary,
+    costs: Mapping[str, DrugCost],
+    solved: Sequence[SolvedEntry],
+    timings: dict[str, object],
+) -> _Extensions:
+    """Run the R2 and R3 rows of design v2.3, recording each phase's time in ``timings``."""
+    clock = time.perf_counter
+    phase = clock()
+    categories = check_categories(solved)
+    synthetic = None if args.no_oracle else run_synthetic()
+    timings["synthetic_s"] = clock() - phase
+    phase = clock()
+    continuity = continuity_with_ej3(formulary, costs, *_load_ej3(args.data_dir))
+    timings["continuity_s"] = clock() - phase
+    phase = clock()
+    population = run_knock_on_population(solved)
+    timings["population_s"] = clock() - phase
+    timings["population_configs"] = [
+        {"configuration": row.configuration, "seconds": row.seconds} for row in population
+    ]
+    return _Extensions(categories, synthetic, continuity, population)
+
+
+def _extensions_json(extensions: _Extensions) -> tuple[dict[str, object], dict[str, object]]:
+    """Return the JSON of the v2.3 rows: the part that goes to ``r2`` and the part to ``r3``."""
+    synthetic: dict[str, object] | None = None
+    if extensions.synthetic is not None:
+        synthetic = dataclasses.asdict(extensions.synthetic)
+    synthetic_r3: dict[str, object] | None = None
+    if synthetic is not None:
+        synthetic_r3 = {key: synthetic.pop(key) for key in _SYNTHETIC_R3_FIELDS}
+        synthetic_r3.update(seed=synthetic["seed"], count=synthetic["count"])
+    r2: dict[str, object] = {
+        "categories": [dataclasses.asdict(c) for c in extensions.categories],
+        "synthetic": synthetic,
+        "continuity_with_ej3": dataclasses.asdict(extensions.continuity),
+    }
+    r3: dict[str, object] = {
+        "knock_on_population": [row.to_dict() for row in extensions.population],
+        "synthetic_row": synthetic_r3,
+    }
+    return r2, r3
 
 
 def _experiments(args: argparse.Namespace) -> int:
@@ -367,11 +496,13 @@ def _experiments(args: argparse.Namespace) -> int:
     _print_worked_example(example)
 
     phase = clock()
-    validation = run_validation(entries, use_oracle=not args.no_oracle)
+    solved = solve_entries(entries)
+    validation = run_validation(entries, use_oracle=not args.no_oracle, solved_entries=solved)
     rows = census(entries)
     census_ok = census_matches_design(rows)
     timings["r2_s"] = clock() - phase
     _print_validation(validation, census_ok)
+    extensions = _run_extensions(args, formulary, costs, solved, timings)
 
     phase = clock()
     extended = _extended_case(entries)
@@ -396,6 +527,7 @@ def _experiments(args: argparse.Namespace) -> int:
         for r in r3_runs
     ]
     _print_algorithm_table(r3_runs)
+    _print_extensions(extensions)
 
     phase = clock()
     out_dir: Path = args.out_dir
@@ -411,11 +543,15 @@ def _experiments(args: argparse.Namespace) -> int:
         (problem.problem_id, LABELS_ES[title], h_star)
         for (problem, h_star), title in zip(instances, _R3_TITLES, strict=True)
     ]
-    written += _write_tables(out_dir, example, validation, census_ok, r3_runs, r3_instances, names)
+    written += _write_tables(
+        out_dir, example, validation, rows, extensions, r3_runs, r3_instances, names
+    )
     timings["figures_and_tables_s"] = clock() - phase
 
     validation_dict = dataclasses.asdict(validation)
     context = validation_dict.pop("context")
+    r2_extra, r3_extra = _extensions_json(extensions)
+    validation_dict.update(r2_extra)
     results = {
         "schema": RESULTS_SCHEMA,
         "provenance": _provenance(formulary, args.no_oracle),
@@ -432,6 +568,7 @@ def _experiments(args: argparse.Namespace) -> int:
             "instances": [{"problem_id": p, "h_star": h} for p, _title, h in r3_instances],
             "min_conflicts": {"max_steps": MIN_CONFLICTS_STEPS, "seed": MIN_CONFLICTS_SEED},
             "runs": [r.to_dict() for r in r3_runs],
+            **r3_extra,
         },
         "extended_case": {
             "instance": dataclasses.asdict(instance_data(extended, formulary.contraindications)),

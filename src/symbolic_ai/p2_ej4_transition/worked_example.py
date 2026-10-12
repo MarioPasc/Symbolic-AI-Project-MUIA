@@ -5,7 +5,8 @@ R1 is the centre of the talk. It follows one instance, the case study ``DEP|LIVE
 
 1. the instance as data rows (drugs with washout and taper days, the contraindication, the
    interactions, the start regimen, the acceptable drugs);
-2. node consistency: the domains of every variable ``(condition, day)`` (design §4.2);
+2. node consistency: the domains of every variable ``(condition, day)`` (design §4.2; AIMA 4th
+   ed. §5.2.1 "Node consistency");
 3. AC-3 at ``H* - 1``: an emptied domain proves that horizon infeasible with no search;
 4. AC-3 at ``H*``: what is left for the search;
 5. the search trace and the schedule at ``H*``, checked by the independent checker.
@@ -471,8 +472,8 @@ def horizon_domains(
 
     The node-consistent domains come from ``csp_builder.node_consistent_domains`` and the AC-3
     domains from ``solve.ac3_domains`` (aima's AC-3 with our deterministic arc order, AIMA 4th ed.
-    §5.2.1). The emptied variable is taken from the trace of the solver's own run: the wipe-out
-    it records right after the AC-3 preprocessing.
+    §5.2.2 "Arc consistency"). The emptied variable is taken from the trace of the solver's own
+    run: the wipe-out it records right after the AC-3 preprocessing.
 
     Parameters
     ----------
