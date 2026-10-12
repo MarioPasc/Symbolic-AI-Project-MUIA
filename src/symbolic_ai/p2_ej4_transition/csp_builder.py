@@ -1,10 +1,10 @@
 """Build the time-indexed CSP of EJ4 for one horizon, as an ``aima.csp.CSP`` (design §4).
 
 A variable ``(condition_id, day)`` says what is given for a condition on a day ``0..H``; its values
-are those of the frozen contract (``problem.Value``). Node consistency is applied when the domains
-are built (AIMA 4th ed. §5.2.1): the start regimen on day 0, no newly contraindicated drug on the
-days in between, an acceptable drug at full dose on day ``H``. Every other rule is one of two
-binary constraint families:
+are those of the frozen contract (``problem.Value``). Node consistency (AIMA 4th ed. §5.2.1 "Node
+consistency") is applied when the domains are built: the start regimen on day 0, no newly
+contraindicated drug on the days in between, an acceptable drug at full dose on day ``H``. Every
+other rule is one of two binary constraint families:
 
 - **T** (transition), between ``(c, t-1)`` and ``(c, t)``: keep the drug, start or continue its
   taper, switch to another drug only after the whole taper, or start a first drug for a newly

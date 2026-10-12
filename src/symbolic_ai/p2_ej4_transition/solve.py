@@ -3,12 +3,14 @@
 Design decision D22: every algorithm comes from the vendored ``src/aima/csp.py`` (aima-python
 commit f104e03, MIT); this module only chooses and wraps them (design §6.1):
 
-- consistency before search: AC-3 (AIMA 4th ed. §5.2.1; ``csp.py`` l.200-238, 3rd ed. Fig. 6.3);
-- search: chronological backtracking (§5.3; l.449-475, 3rd ed. Fig. 6.5) with no inference,
-  forward checking or MAC (§5.3.2; l.423-443), a static or MRV variable order and a keep-first or
-  LCV value order (§5.3.1; l.386-420);
-- local search: min-conflicts (§5.4; l.478-503, 3rd ed. Fig. 6.8), which may find a solution but
-  can never prove that there is none.
+- consistency before search: AC-3 (AIMA 4th ed. §5.2.2 "Arc consistency"; ``csp.py``
+  l.200-238; 3rd ed. Fig. 6.3);
+- search: chronological backtracking (§5.3 "Backtracking search for CSPs"; l.449-475; 3rd ed.
+  Fig. 6.5) with no inference, forward checking or MAC (§5.3.2 "Interleaving search and
+  inference"; l.423-443), a static or MRV variable order and a keep-first or LCV value order
+  (§5.3.1 "Variable and value ordering"; l.386-420);
+- local search: min-conflicts (§5.4 "Local search for CSPs"; l.478-503; 3rd ed. Fig. 6.8), which
+  may find a solution but can never prove that there is none.
 
 The wrappers add, without editing aima: deterministic tie-breaks (MRV and AC-3's arc order follow
 the static variable order instead of chance or hash order), a per-run timeout, the trace of the
@@ -265,7 +267,7 @@ def solve_horizon(
 
     The run is: build the CSP (node-consistent domains), optionally AC-3 to a fixpoint (an empty
     domain proves the horizon infeasible with no search), then aima's ``backtracking_search`` with
-    the configured variable order, value order and inference (AIMA 4th ed. §5.2-§5.3).
+    the configured variable order, value order and inference (AIMA 4th ed. §5.2.2 and §5.3).
 
     Parameters
     ----------
@@ -345,7 +347,7 @@ def find_min_horizon(
 
 
 def ac3_domains(problem: TransitionProblem, horizon: int) -> tuple[bool, Domains]:
-    """Return the domains after node consistency and then aima's AC-3 (AIMA 4th ed. §5.2.1).
+    """Return the domains after node consistency and then aima's AC-3 (AIMA 4th ed. §5.2.2).
 
     Parameters
     ----------
@@ -537,6 +539,8 @@ def _variable_selector(
 def _mrv(assignment: _Assignment, csp: Any) -> Variable:
     """Choose a variable as aima's ``mrv`` (``csp.py`` l.391) does, with ties in static order.
 
+    Minimum remaining values: AIMA 4th ed. §5.3.1 "Variable and value ordering".
+
     aima's version is ``argmin_random_tie(unassigned, key=num_legal_values)``; ``min`` with the same
     key returns the first minimum, and the unassigned variables are listed in static order.
     """
@@ -563,6 +567,8 @@ def _value_orderer(
 
 def _keep_first(variable: Variable, assignment: _Assignment, csp: Any) -> list[Value]:
     """Return the current values of ``variable`` in keep-first order (design §6.1, v2.3).
+
+    A value-ordering heuristic in the sense of AIMA 4th ed. §5.3.1 "Variable and value ordering".
 
     aima's ``unordered_domain_values`` (``csp.py`` l.410) returns ``csp.choices(var)`` as it is,
     and its order drifts: on a backtrack ``restore`` (l.172) appends the restored values at the
