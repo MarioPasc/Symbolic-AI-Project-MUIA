@@ -58,7 +58,7 @@ __all__ = [
 Inference: TypeAlias = Literal["none", "fc", "mac"]
 #: Variable order: static (by day, then condition) or minimum remaining values.
 VariableOrder: TypeAlias = Literal["static", "mrv"]
-#: Value order: the domain order (the start drug first) or least constraining value.
+#: Value order: keep-first (the static domain order, design §6.1) or least constraining value.
 ValueOrder: TypeAlias = Literal["keep_first", "lcv"]
 #: Outcome of one horizon. ``not_found`` is only reported by min-conflicts, which cannot prove
 #: infeasibility; ``timeout`` (the clock) and ``budget`` (the assignment budget) mean unknown.
@@ -87,8 +87,9 @@ class SolverConfig:
         ``"static"`` (aima's ``first_unassigned_variable``: by day, then condition) or ``"mrv"``
         (minimum remaining values, ties broken by the static order).
     value_order
-        ``"keep_first"`` (aima's ``unordered_domain_values``: the domain order, which tries the
-        start drug first) or ``"lcv"`` (aima's least-constraining-value).
+        ``"keep_first"`` (the static domain order of ``csp_builder.condition_values``: the start
+        drug if still acceptable, the other acceptable drugs, the withdrawn start drug, ``None``
+        last; kept stable after backtracking) or ``"lcv"`` (aima's least-constraining-value).
     ac3_preprocess
         Whether AC-3 runs on the node-consistent domains before the search.
     timeout_s
@@ -551,13 +552,26 @@ def _value_orderer(
     It hands aima's search the values one at a time; when they run out (aima's ``backtrack``
     leaves its loop with no solution), it records the backtrack in the trace.
     """
-    order = aima_csp.lcv if config.value_order == "lcv" else aima_csp.unordered_domain_values
+    order = aima_csp.lcv if config.value_order == "lcv" else _keep_first
 
     def values(variable: Variable, assignment: _Assignment, csp: Any) -> Iterator[Value]:
-        yield from list(order(variable, assignment, csp))
+        yield from order(variable, assignment, csp)
         _record(trace, "backtrack", variable, None, "every value failed: undo and go back")
 
     return values
+
+
+def _keep_first(variable: Variable, assignment: _Assignment, csp: Any) -> list[Value]:
+    """Return the current values of ``variable`` in keep-first order (design §6.1, v2.3).
+
+    aima's ``unordered_domain_values`` (``csp.py`` l.410) returns ``csp.choices(var)`` as it is,
+    and its order drifts: on a backtrack ``restore`` (l.172) appends the restored values at the
+    end. Sorting by the position in the static domain, which ``csp_builder`` builds in keep-first
+    order, gives the same order on every visit.
+    """
+    del assignment  # aima's value-order signature passes it; the order does not depend on it
+    static: list[Value] = csp.domains[variable]
+    return sorted(csp.choices(variable), key=static.index)
 
 
 def _inference(config: SolverConfig, trace: list[TraceEvent] | None) -> _InferenceFunction:

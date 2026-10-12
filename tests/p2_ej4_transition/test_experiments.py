@@ -222,13 +222,13 @@ def test_algorithm_table_on_the_worked_example(case_study: TransitionProblem) ->
     ]
     assert [(r.status, r.assignments, r.checks, r.ac3_removed) for r in runs] == [
         ("infeasible", 218, 6558, 0),
-        ("solved", 266, 7846, 0),
+        ("solved", 244, 7546, 0),
         ("infeasible", 25, 499, 0),
         ("solved", 51, 1206, 0),
         ("infeasible", 26, 918, 0),
         ("solved", 45, 1694, 0),
-        ("infeasible", 0, 1133, 116),
-        ("solved", 26, 2070, 133),
+        ("infeasible", 0, 1234, 116),
+        ("solved", 26, 2264, 133),
     ]
     assert "seconds" not in runs[0].to_dict()
     assert runs[-1].label == MAIN_CONFIG.label

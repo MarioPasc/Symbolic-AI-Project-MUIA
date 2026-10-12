@@ -23,6 +23,7 @@ from symbolic_ai.p2_ej4_transition import (
     TransitionProblem,
     Value,
     csp_builder,
+    solve,
 )
 from symbolic_ai.p2_ej4_transition.csp_builder import Variable, build_csp, node_consistent_domains
 from symbolic_ai.p2_ej4_transition.solve import (
@@ -224,7 +225,7 @@ def test_main_config_solves_horizon_12_without_backtracking() -> None:
 
 @pytest.mark.parametrize(
     ("horizon", "assignments", "checks", "removed"),
-    [(11, 0, 1133, 116), (12, 26, 2070, 133)],
+    [(11, 0, 1234, 116), (12, 26, 2264, 133)],
 )
 def test_main_config_effort_on_the_worked_example(
     horizon: int, assignments: int, checks: int, removed: int
@@ -294,6 +295,37 @@ def test_trace_of_plain_backtracking_shows_assignments_and_backtracks() -> None:
     assert {e.detail for e in tries} == {"assigned"}
     assert trace[-1].kind == "backtrack"
     assert trace[-1].variable == ("DEP", 0)  # the search gave up at the first variable
+
+
+def test_keep_first_order_survives_a_restore() -> None:
+    # T2 at H = 3: (X, 1) holds x2, then the withdrawn x1 and its two taper days.
+    csp = build_csp(ej4_toys.T2.problem, 3)
+    variable: Variable = ("X", 1)
+    static = csp.domains[variable]
+    assert static == [("x2", 0), ("x1", 0), ("x1", 1), ("x1", 2)]
+    csp.restore(csp.suppose(variable, ("x1", 1)))  # what backtracking does after a failed value
+    assert csp.choices(variable) == [("x1", 1), ("x2", 0), ("x1", 0), ("x1", 2)]  # aima appends
+    assert solve._keep_first(variable, {}, csp) == static
+    values = solve._value_orderer(MAIN_CONFIG, None)
+    assert list(values(variable, {}, csp)) == static
+
+
+def test_keep_first_tries_follow_the_static_order_on_every_visit() -> None:
+    # Plain backtracking revisits variables after backtracks (244 assignments for 26 variables);
+    # within one visit (from its "select" to the next one) the values assigned to a variable keep
+    # their static order. With aima's own unordered_domain_values this fails on (DEP, 11).
+    trace: list[TraceEvent] = []
+    run = solve_horizon(worked_example(), 12, PLAIN_BT, trace)
+    domains = build_csp(worked_example(), 12).domains
+    visits: dict[Variable, list[int]] = {}
+    for event in trace:
+        if event.kind == "select" and event.variable is not None:
+            visits[event.variable] = []
+        elif event.kind == "try" and event.variable is not None:
+            positions = visits[event.variable]
+            positions.append(domains[event.variable].index(event.value))
+            assert positions == sorted(positions), event
+    assert run.status == "solved"
 
 
 def test_trace_of_ac3_preprocessing_on_t2() -> None:
@@ -460,7 +492,7 @@ def test_budget_stops_the_run_at_the_same_assignment() -> None:
 
 
 @pytest.mark.parametrize(
-    ("horizon", "status", "assignments"), [(11, "infeasible", 218), (12, "solved", 266)]
+    ("horizon", "status", "assignments"), [(11, "infeasible", 218), (12, "solved", 244)]
 )
 def test_a_large_enough_budget_changes_nothing(horizon: int, status: str, assignments: int) -> None:
     unbudgeted = solve_horizon(worked_example(), horizon, PLAIN_BT)

@@ -180,7 +180,7 @@ def test_experiments_record_the_confirmed_r1_numbers(tmp_path: Path) -> None:
     assert (r1["h_star"], h11["emptied"], h11["removed_by_ac3"]) == (12, ["DEP", 2], 116)
     assert (h12["run"]["assignments"], h12["run"]["checks"], h12["removed_by_ac3"]) == (
         26,
-        2070,
+        2264,
         133,
     )
     assert r1["valid"] is True

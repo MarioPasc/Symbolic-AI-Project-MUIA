@@ -60,11 +60,15 @@ Constraint: TypeAlias = Callable[[Variable, Value, Variable, Value], bool]
 
 
 def condition_values(problem: TransitionProblem, condition: str) -> tuple[Value, ...]:
-    """Return every value of a condition, ``V_c``, in keep-first order (design §4.2).
+    """Return every value of a condition, ``V_c``, in keep-first order (design §4.2, §6.1).
 
-    Keep-first order is the start drug at full dose and then its taper days, then every other
-    candidate in alphabetical order, each at full dose and then its taper days. A newly diagnosed
-    condition (no start drug) has the untreated value ``None`` first.
+    Keep-first order (design v2.3) lists the drugs in this order, each at full dose and then its
+    taper days: the start drug if it is still acceptable; the other acceptable drugs, in
+    alphabetical order; the withdrawn start drug (no longer acceptable); the other candidates
+    (never in a domain, listed for completeness). The untreated value ``None`` of a newly
+    diagnosed condition comes last. It is a heuristic for the search, not an objective: try to
+    keep what still works, to start the new condition as early as possible and to leave a
+    contraindicated drug as early as possible.
 
     Parameters
     ----------
@@ -80,11 +84,16 @@ def condition_values(problem: TransitionProblem, condition: str) -> tuple[Value,
         when the condition starts untreated.
     """
     start = problem.start[condition]
-    others = [drug for drug in problem.candidates[condition] if drug != start]
-    drugs = others if start is None else [start, *others]
-    values: list[Value] = [None] if start is None else []
-    for drug in drugs:
+    acceptable = problem.acceptable[condition]
+    kept = [start] if start is not None and start in acceptable else []
+    others = [drug for drug in acceptable if drug != start]
+    withdrawn = [start] if start is not None and start not in acceptable else []
+    never_given = [d for d in problem.candidates[condition] if d not in acceptable and d != start]
+    values: list[Value] = []
+    for drug in kept + others + withdrawn + never_given:
         values.extend((drug, phase) for phase in range(problem.taper_days[drug] + 1))
+    if start is None:
+        values.append(None)
     return tuple(values)
 
 
