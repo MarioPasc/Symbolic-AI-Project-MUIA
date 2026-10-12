@@ -186,34 +186,38 @@ def _check_transition(problem: TransitionProblem, grid: _Grid, horizon: int) -> 
             before, after = (condition, day - 1), (condition, day)
             if before not in grid or after not in grid:
                 continue
-            if not _is_allowed_step(problem, grid[before], grid[after]):
+            if not _is_allowed_step(problem, condition, grid[before], grid[after]):
                 detail = f"{_show(grid[before])} -> {_show(grid[after])} is not an allowed step"
                 violations.append(Violation("transition", condition, day, detail))
     return violations
 
 
-def _is_allowed_step(problem: TransitionProblem, before: Value, after: Value) -> bool:
-    """Return whether one condition may go from ``before`` to ``after`` in one day.
+def _is_allowed_step(
+    problem: TransitionProblem, condition: str, before: Value, after: Value
+) -> bool:
+    """Return whether ``condition`` may go from ``before`` to ``after`` in one day.
 
-    In words (design §4.3, T): a full-dose drug is kept, or switched to another drug at full dose
-    if it needs no taper, or its taper starts (phase 1); a taper advances one phase per day; after
-    the last taper phase the condition switches to another drug at full dose; an untreated new
-    condition stays untreated or starts a drug at full dose. Nothing else is allowed. Whether the
-    new drug is a candidate is rule *domain*'s concern.
+    In words (design v2.1 §4.3, T): a full-dose drug is kept, or switched to another drug at full
+    dose if it needs no taper, or its taper starts (phase 1); a taper advances one phase per day;
+    after the last taper phase the condition switches to another drug at full dose; an untreated
+    new condition stays untreated or starts a drug at full dose. The target of a switch or a start
+    must be acceptable: keeping and tapering the start drug is its withdrawal, but once left it is
+    never given again unless acceptable. Nothing else is allowed. Whether the new drug is a
+    candidate is rule *domain*'s concern.
     """
+    acceptable = problem.acceptable[condition]
     if before is None:
-        return after is None or after[1] == 0
+        return after is None or (after[1] == 0 and after[0] in acceptable)
     if after is None:
         return False  # a treated condition is never left untreated
     (drug, phase), (next_drug, next_phase) = before, after
     taper = problem.taper_days[drug]
     if phase == 0 and next_drug == drug:
         return next_phase == 0 or (next_phase == 1 and taper >= 1)
-    if phase == 0:
-        return next_phase == 0 and taper == 0
     if next_drug == drug:
         return 1 <= phase < taper and next_phase == phase + 1
-    return phase == taper and next_phase == 0
+    switch_allowed = taper == 0 if phase == 0 else phase == taper
+    return switch_allowed and next_phase == 0 and next_drug in acceptable
 
 
 def _check_interaction(problem: TransitionProblem, grid: _Grid, horizon: int) -> list[Violation]:

@@ -174,6 +174,17 @@ def test_unsafe_starting_regimen_is_impossible() -> None:
     assert (result.h_star, result.status, result.states_expanded) == (None, "impossible", 0)
 
 
+def test_oracle_never_switches_to_a_contraindicated_drug() -> None:
+    # Design v2.1: switch and start targets are acceptable; the bridge x3 of T6 stays forbidden.
+    problem = ej4_toys._x_only("contraindicated-start", ("x2", "x3"), candidates=("x1", "x2", "x3"))
+    result = oracle_min_horizon(problem)
+    assert (result.h_star, result.status) == (1, "found")
+    search = DailyStateProblem(problem)
+    for state in [search.initial, search.result(search.initial, (("x2", 0),))]:
+        targets = {values[0] for values in search.actions(state)}
+        assert ("x1", 0) not in targets - {state.values[0]}
+
+
 def test_no_acceptable_drug_is_impossible() -> None:
     problem = ej4_toys._x_only("none-acceptable", (), taper={"x1": 2}, washout={"x1": 3})
     assert oracle_min_horizon(problem).status == "impossible"

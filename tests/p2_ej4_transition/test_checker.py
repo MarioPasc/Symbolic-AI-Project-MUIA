@@ -175,13 +175,13 @@ MUTATIONS: dict[str, tuple[TransitionProblem, ScheduleDict, int, set[str]]] = {
         ej4_toys.T6.problem,
         schedule({"X": [full("x1"), full("x3"), full("x2")]}),
         2,
-        {"domain"},
+        {"domain", "transition"},  # v2.1: a switch target must be acceptable
     ),
     "drug of another condition on an intermediate day (T5)": (
         ej4_toys.T5.problem,
         _mutated(T5_SCHEDULE, X1=full("y2")),
         4,
-        {"domain"},
+        {"domain", "transition"},  # y2 is not an acceptable drug of X
     ),
     "taper phase beyond the taper days (T2)": (
         ej4_toys.T2.problem,
@@ -282,9 +282,27 @@ def test_worked_example_schedules_are_accepted() -> None:
 def test_worked_example_paracetamol_is_contraindicated() -> None:
     problem = worked_example()
     rows = worked_example_schedule("paracetamol")
-    assert rules_of(check_schedule(problem, rows, 12)) == {"final"}
+    # v2.1: starting a non-acceptable drug also breaks the transition rule.
+    assert rules_of(check_schedule(problem, rows, 12)) == {"final", "transition"}
     rows[("PAIN", 13)], rows[("DEP", 13)] = full("tramadol"), full("mirtazapine")
-    assert rules_of(check_schedule(problem, rows, 13)) == {"domain"}
+    assert rules_of(check_schedule(problem, rows, 13)) == {"domain", "transition"}
+
+
+def contraindicated_start_problem() -> TransitionProblem:
+    """X treated with x1, now contraindicated; x2 and x3 acceptable; no taper, no washout."""
+    return ej4_toys._x_only("contraindicated-start", ("x2", "x3"), candidates=("x1", "x2", "x3"))
+
+
+def test_returning_to_the_contraindicated_start_drug_is_a_transition_violation() -> None:
+    # Design v2.1: once the condition has left x1, x1 is never given again unless acceptable.
+    rows = schedule({"X": [full("x1"), full("x2"), full("x1"), full("x2")]})
+    violations = check_schedule(contraindicated_start_problem(), rows, 3)
+    assert [(v.rule, v.condition, v.day) for v in violations] == [("transition", "X", 2)]
+
+
+def test_keeping_the_contraindicated_start_drug_is_still_allowed() -> None:
+    rows = schedule({"X": [full("x1"), full("x1"), full("x1"), full("x3")]})
+    assert check_schedule(contraindicated_start_problem(), rows, 3) == ()
 
 
 def test_unsafe_day_zero_is_an_interaction_violation() -> None:

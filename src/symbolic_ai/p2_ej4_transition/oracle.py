@@ -136,14 +136,16 @@ class DailyStateProblem:
     def _next_values(self, condition: str, value: Value) -> list[Value]:
         """Values of ``condition`` tomorrow: rule *transition*, then rule *domain*.
 
-        Transition (design §4.3, T): a full-dose drug is kept, tapered (phase 1) if it has a taper,
-        or switched to another candidate at full dose if it has none; a taper advances one phase a
-        day and, after its last phase, switches to another candidate at full dose; an untreated new
-        condition stays untreated or starts a candidate at full dose. Domain (§4.2, days
-        ``0 < t < H``): a drug other than the start drug must be acceptable.
+        Transition (design v2.1 §4.3, T): a full-dose drug is kept, tapered (phase 1) if it has a
+        taper, or switched to another candidate at full dose if it has none; a taper advances one
+        phase a day and, after its last phase, switches to another candidate at full dose; an
+        untreated new condition stays untreated or starts a candidate at full dose. The target of
+        a switch or a start must be acceptable. Domain (§4.2, days ``0 < t < H``): a drug other
+        than the start drug must be acceptable (implied here by the transition rule; kept as the
+        rule's own filter).
         """
         problem = self.problem
-        others = [(d, 0) for d in problem.candidates[condition] if d != drug_of(value)]
+        others = [(d, 0) for d in problem.acceptable[condition] if d != drug_of(value)]
         nexts: list[Value]
         if value is None:
             nexts = [None, *others]
