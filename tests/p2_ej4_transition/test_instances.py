@@ -1,9 +1,10 @@
 """EJ4's instance enumeration on a hand-made formulary (unit) and on the real data (integration).
 
 The tiny formulary has conditions A (a1, a2) and B (b1, b2) and risk factors R and S: R
-contraindicates a1, a2 needs the companion b2 under S (so, by D23, S excludes a2), and a2 interacts
-with b1. Costs: a1 = b1 = 1, a2 = b2 = 2. Every expected value below is worked out by hand from
-these tables in the comment next to it.
+contraindicates a1, a2 needs the companion b2 under S (b2 is not B's only candidate, so by D23 S
+excludes a2), and a2 interacts with b1. Costs: a1 = b1 = 1, a2 = b2 = 2. Every expected value below
+is worked out by hand from these tables in the comment next to it. A second formulary, where the
+companion is the only candidate of a condition, covers the other side of D23.
 """
 
 from __future__ import annotations
@@ -42,7 +43,8 @@ from symbolic_ai.p2_ej4_transition.instances import (
     cheapest_safe_regimen,
     enumerate_problems,
 )
-from symbolic_ai.p2_ej4_transition.problem import Event, EventKind
+from symbolic_ai.p2_ej4_transition.problem import Event, EventKind, drug_of
+from symbolic_ai.p2_ej4_transition.solve import MAIN_CONFIG, find_min_horizon
 
 RF = EventKind.NEW_RISK_FACTOR
 COND = EventKind.NEW_CONDITION
@@ -86,27 +88,113 @@ def _entry_of(entries: tuple[ProblemEntry, ...], history: History, event: Event)
 
 
 @pytest.mark.parametrize(
-    ("condition", "risk_factors", "expected"),
+    ("condition", "risk_factors", "conditions", "expected"),
     [
-        ("A", (), ("a1", "a2")),
-        ("A", ("R",), ("a2",)),  # contraindication
-        ("A", ("S",), ("a1",)),  # D23: a2 needs a companion under S
-        ("A", ("R", "S"), ()),
-        ("B", ("R", "S"), ("b1", "b2")),
+        ("A", (), (), ("a1", "a2")),
+        ("A", ("R",), (), ("a2",)),  # contraindication
+        ("A", ("S",), (), ("a1",)),  # D23: a2 needs b2 under S, and no condition forces b2
+        # b2 is one of two candidates of B, so a regimen for {A, B} need not give it.
+        ("A", ("S",), ("A", "B"), ("a1",)),
+        ("A", ("R", "S"), ("A", "B"), ()),
+        ("B", ("R", "S"), ("A", "B"), ("b1", "b2")),
     ],
 )
 def test_acceptable_drugs_apply_contraindications_and_d23(
-    condition: str, risk_factors: tuple[str, ...], expected: tuple[str, ...]
+    condition: str,
+    risk_factors: tuple[str, ...],
+    conditions: tuple[str, ...],
+    expected: tuple[str, ...],
 ) -> None:
-    assert acceptable_drugs(_tiny_formulary(), condition, risk_factors) == expected
+    formulary = _tiny_formulary()
+    assert acceptable_drugs(formulary, condition, risk_factors, conditions=conditions) == expected
 
 
-@pytest.mark.parametrize(("condition", "risk_factors"), [("Z", ()), ("A", ("Q",))])
+@pytest.mark.parametrize(
+    ("condition", "risk_factors", "conditions"),
+    [("Z", (), ()), ("A", ("Q",), ()), ("A", (), ("A", "Z"))],
+)
 def test_acceptable_drugs_reject_unknown_identifiers(
-    condition: str, risk_factors: tuple[str, ...]
+    condition: str, risk_factors: tuple[str, ...], conditions: tuple[str, ...]
 ) -> None:
     with pytest.raises(InstanceError):
-        acceptable_drugs(_tiny_formulary(), condition, risk_factors)
+        acceptable_drugs(_tiny_formulary(), condition, risk_factors, conditions=conditions)
+
+
+def _companion_formulary() -> Formulary:
+    """A (a1, a2) and G, whose only candidate is g; a2 needs the companion g under S.
+
+    This is the shape of the real ibuprofen/AGE65/omeprazole rule: G plays GERD, g omeprazole.
+    """
+    return Formulary(
+        version="test",
+        conditions=(Condition("A", "A", "A"), Condition("G", "G", "G")),
+        drugs=tuple(Drug(d, d, d) for d in ("a1", "a2", "g")),
+        risk_factors=(RiskFactor("S", "S", "S"),),
+        candidates={"A": frozenset({"a1", "a2"}), "G": frozenset({"g"})},
+        interactions=(),
+        contraindications=(),
+        coprescriptions=(Coprescription("a2", "S", "g", "reason"),),
+    )
+
+
+def _companion_costs() -> dict[str, DrugCost]:
+    # a2 is the cheaper drug of A, so R_0 picks it whenever it is acceptable.
+    return {d: DrugCost(d, c) for d, c in {"a1": 5, "a2": 1, "g": 1}.items()}
+
+
+@pytest.mark.parametrize(
+    ("conditions", "expected"),
+    [
+        ((), ("a1",)),  # nothing forces g: a2 is out under S
+        (("A",), ("a1",)),
+        (("A", "G"), ("a1", "a2")),  # G is treated, and only by g, so a2's companion is given
+        (("G", "A"), ("a1", "a2")),  # the order of the conditions does not matter
+    ],
+)
+def test_d23_accepts_a_coprescribed_drug_iff_its_companion_is_forced(
+    conditions: tuple[str, ...], expected: tuple[str, ...]
+) -> None:
+    formulary = _companion_formulary()
+    assert acceptable_drugs(formulary, "A", ("S",), conditions=conditions) == expected
+    assert acceptable_drugs(formulary, "A", (), conditions=conditions) == ("a1", "a2")
+
+
+@pytest.mark.parametrize(
+    ("history", "expected"),
+    [
+        (History(("A",), ("S",)), {"A": "a1"}),  # companion absent: a2 excluded
+        (History(("A", "G"), ("S",)), {"A": "a2", "G": "g"}),  # companion given for G
+        (History(("A",), ()), {"A": "a2"}),
+    ],
+)
+def test_cheapest_safe_regimen_applies_d23_on_the_history_conditions(
+    history: History, expected: dict[str, str]
+) -> None:
+    assert cheapest_safe_regimen(_companion_formulary(), _companion_costs(), history) == expected
+
+
+@pytest.mark.parametrize(
+    ("history", "event", "category"),
+    [
+        # R_0 = a2 + g; S leaves a2 acceptable because G (only g) stays treated.
+        (History(("A", "G"), ()), Event(RF, "S"), Category.TRIVIAL),
+        # R_0 = a2; under S without G, a2 must go.
+        (History(("A",), ()), Event(RF, "S"), Category.FORCED_ONLY),
+        # R_0 = a1 under S; the new condition G makes a2 acceptable again (judged on C1).
+        (History(("A",), ("S",)), Event(COND, "G"), Category.FORCED_ONLY),
+    ],
+)
+def test_d23_is_judged_on_the_conditions_after_the_event(
+    history: History, event: Event, category: Category
+) -> None:
+    pk = {d: Pharmacokinetics(d, washout_days=1, taper_days=0) for d in ("a1", "a2", "g")}
+    entries = enumerate_problems(_companion_formulary(), _companion_costs(), pk)
+    entry = _entry_of(entries, history, event)
+    assert entry.category is category
+    if event == Event(COND, "G"):
+        assert entry.problem is not None
+        assert entry.problem.acceptable["A"] == ("a1", "a2")
+        assert dict(entry.problem.start) == {"A": "a1", "G": None}
 
 
 # --- cheapest safe regimen ----------------------------------------------------------------------
@@ -294,10 +382,26 @@ def real_entries(
 
 @pytest.mark.integration
 def test_real_census_is_the_design_table(real_entries: tuple[ProblemEntry, ...]) -> None:
+    # D23 exact (2026-10-12); the conservative D23 gave 8896/1664/5472/1600/160 and
+    # 8512/1236/0/7084/192 over 2688 histories.
     assert census(real_entries) == (
-        CensusRow(RF, events=8896, refer=1664, trivial=5472, forced_only=1600, knock_on=160),
-        CensusRow(COND, events=8512, refer=1236, trivial=0, forced_only=7084, knock_on=192),
+        CensusRow(RF, events=8960, refer=1600, trivial=5592, forced_only=1592, knock_on=176),
+        CensusRow(COND, events=8592, refer=1236, trivial=0, forced_only=7132, knock_on=224),
     )
+
+
+@pytest.mark.integration
+def test_real_entries_per_category(real_entries: tuple[ProblemEntry, ...]) -> None:
+    counts = {category: 0 for category in Category}
+    for entry in real_entries:
+        counts[entry.category] += 1
+    assert len(real_entries) == 4143
+    assert counts == {
+        Category.REFER: 888,
+        Category.TRIVIAL: 607,
+        Category.FORCED_ONLY: 2486,
+        Category.KNOCK_ON: 162,
+    }
 
 
 @pytest.mark.integration
@@ -307,8 +411,9 @@ def test_real_starting_histories(
 ) -> None:
     formulary, costs, _pk_table = real_data
     run = _Enumeration(_tables(formulary), {d: c.monthly_cost_cents for d, c in costs.items()})
-    assert sum(1 for _ in _start_regimens(run)) == 2688
-    assert len({h for e in real_entries for h, _event in e.occurrences}) == 2688
+    # P1 prescribes on 2752 histories; 32 of them need a companion drug (test_instances_continuity).
+    assert sum(1 for _ in _start_regimens(run)) == 2720
+    assert len({h for e in real_entries for h, _event in e.occurrences}) == 2720
 
 
 @pytest.mark.integration
@@ -338,8 +443,40 @@ def test_d23_on_the_real_data(
     real_data: tuple[Formulary, Mapping[str, DrugCost], Mapping[str, Pharmacokinetics]],
 ) -> None:
     formulary = real_data[0]
-    assert acceptable_drugs(formulary, "PAIN", ()) == ("ibuprofen", "paracetamol", "tramadol")
+    everything = ("ibuprofen", "paracetamol", "tramadol")
+    assert acceptable_drugs(formulary, "PAIN", ()) == everything
     assert acceptable_drugs(formulary, "PAIN", ("AGE65",)) == ("paracetamol", "tramadol")
+    assert acceptable_drugs(formulary, "PAIN", ("AGE65",), conditions=("DEP", "PAIN")) == (
+        "paracetamol",
+        "tramadol",
+    )
+    # GERD's only candidate is omeprazole, ibuprofen's companion under AGE65.
+    assert acceptable_drugs(formulary, "PAIN", ("AGE65",), conditions=("GERD", "PAIN")) == (
+        everything
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("history", "expected"),
+    [
+        # The review's example: EJ3 gives ibuprofen (omeprazole is given for GERD anyway).
+        (
+            History(("GERD", "PAIN"), ("AGE65", "LIVER")),
+            {"GERD": "omeprazole", "PAIN": "ibuprofen"},
+        ),
+        (History(("PAIN",), ("AGE65", "LIVER")), {"PAIN": "tramadol"}),
+        # Only ibuprofen + omeprazole would do, which needs two drugs for one condition.
+        (History(("PAIN",), ("AGE65", "EPI", "LIVER")), None),
+    ],
+)
+def test_real_r0_under_d23(
+    real_data: tuple[Formulary, Mapping[str, DrugCost], Mapping[str, Pharmacokinetics]],
+    history: History,
+    expected: dict[str, str] | None,
+) -> None:
+    formulary, costs, _pk_table = real_data
+    assert cheapest_safe_regimen(formulary, costs, history) == expected
 
 
 @pytest.mark.integration
@@ -359,3 +496,64 @@ def test_case_study(
     assert problem.washout_days["sertraline"] == 7
     entry = _entry_of(real_entries, History(("DEP",), ("LIVER",)), Event(COND, "PAIN"))
     assert entry.category is Category.KNOCK_ON
+
+
+# --- categories against the solved minimum horizon H* -------------------------------------------
+
+#: The fast suite solves one non-REFER entry in 16 (about 200 of 3255); the slow suite solves all.
+_HSTAR_STRIDE = 16
+
+
+def _check_category_against_h_star(entry: ProblemEntry) -> None:
+    """TRIVIAL iff H* = 0; non-trivial implies H* >= 1; KNOCK_ON changes a still-acceptable drug.
+
+    FORCED_ONLY gets no extra check: the solver's schedule need not keep the drugs it could keep.
+    """
+    problem = entry.problem
+    assert problem is not None
+    result = find_min_horizon(problem, MAIN_CONFIG)
+    assert result.status == "solved", problem.problem_id
+    assert result.h_star is not None and result.schedule is not None
+    assert (result.h_star == 0) == (entry.category is Category.TRIVIAL), problem.problem_id
+    if entry.category is not Category.KNOCK_ON:
+        return
+    kept = {c: d for c, d in problem.start.items() if d is not None and d in problem.acceptable[c]}
+    changed = [
+        (c, day)
+        for (c, day), value in result.schedule.items()
+        if c in kept and drug_of(value) != kept[c]
+    ]
+    assert changed, f"{problem.problem_id}: KNOCK_ON but every still-acceptable drug is kept"
+
+
+def _live(entries: tuple[ProblemEntry, ...]) -> list[ProblemEntry]:
+    return [e for e in entries if e.category is not Category.REFER]
+
+
+def test_tiny_categories_agree_with_h_star(tiny_entries: tuple[ProblemEntry, ...]) -> None:
+    live = _live(tiny_entries)
+    assert {e.category for e in live} == set(Category) - {Category.REFER}
+    for entry in live:
+        _check_category_against_h_star(entry)
+
+
+@pytest.mark.integration
+def test_real_categories_agree_with_h_star_on_a_subset(
+    real_entries: tuple[ProblemEntry, ...],
+) -> None:
+    subset = _live(real_entries)[::_HSTAR_STRIDE]
+    assert len(subset) == 204
+    assert {e.category for e in subset} == set(Category) - {Category.REFER}
+    for entry in subset:
+        _check_category_against_h_star(entry)
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+def test_real_categories_agree_with_h_star_on_every_entry(
+    real_entries: tuple[ProblemEntry, ...],
+) -> None:
+    live = _live(real_entries)
+    assert len(live) == 3255
+    for entry in live:
+        _check_category_against_h_star(entry)

@@ -2,8 +2,14 @@
 
 A *history* is a fully observed patient before the event: a non-empty set of conditions and a set
 of risk factors. Its starting regimen ``R_0`` is the cheapest safe regimen (one acceptable drug per
-condition, no interacting pair), which is what P1's EJ3 prescribes, recomputed here by brute force
-(design D21). An *event* is a risk factor or a condition the history lacks (D20). Each
+condition, no interacting pair), recomputed here by brute force (design D21). Acceptability
+applies P1's co-prescription rule exactly within one drug per condition (D23, see
+:func:`acceptable_drugs`). Measured on the 4032 fully observed histories (tests in
+``test_instances_continuity.py``): ``R_0`` equals the regimen P1's EJ3 agent prescribes on all
+2720 histories where that regimen has one drug per condition; on the other 32 EJ3 adds omeprazole
+as ibuprofen's companion under AGE65 without GERD, which one drug per condition cannot express, and
+EJ4 has no safe regimen; on the 1280 histories EJ3 refers, EJ4 has none either. An *event* is a
+risk factor or a condition the history lacks (D20). Each
 (history, event) pair is classified before any solving:
 
 - ``REFER``: no safe regimen exists after the event, so there is nothing to transition to;
@@ -129,13 +135,23 @@ class CensusRow:
 
 @dataclass(frozen=True, slots=True)
 class _Tables:
-    """The formulary reduced to what EJ4 needs, with every set sorted."""
+    """The formulary reduced to what EJ4 needs, with every set sorted.
+
+    ``contraindicated_by[r]`` holds the drugs risk factor ``r`` contraindicates;
+    ``companions_under[r]`` holds the ``(drug, companion)`` pairs of ``coprescriptions.csv`` for
+    ``r`` (the drug may be given under ``r`` only together with the companion, D23).
+    """
 
     conditions: tuple[str, ...]
     risk_factors: tuple[str, ...]
     candidates: Mapping[str, tuple[str, ...]]
-    excluded_by: Mapping[str, frozenset[str]]
+    contraindicated_by: Mapping[str, frozenset[str]]
+    companions_under: Mapping[str, tuple[tuple[str, str], ...]]
     interactions: frozenset[frozenset[str]]
+
+
+#: The key of the acceptability cache: (condition, sorted risk factors, sorted conditions).
+_AcceptableKey: TypeAlias = tuple[str, tuple[str, ...], tuple[str, ...]]
 
 
 @dataclass(slots=True)
@@ -144,7 +160,7 @@ class _Enumeration:
 
     tables: _Tables
     costs: Mapping[str, int]
-    acceptable: dict[tuple[str, tuple[str, ...]], tuple[str, ...]] = field(default_factory=dict)
+    acceptable: dict[_AcceptableKey, tuple[str, ...]] = field(default_factory=dict)
     safe: dict[_State, tuple[_Regimen, ...]] = field(default_factory=dict)
 
 
@@ -161,46 +177,75 @@ class _Outcome:
 
 
 def _tables(formulary: Formulary) -> _Tables:
-    """Reduce the formulary to EJ4's tables; a coprescribed drug is excluded under its factor (D23).
-
-    D23 applies P1's coprescription rule (axiom A5) conservatively: a drug that needs a companion
-    under a risk factor is not acceptable when that factor is present, so every regimen keeps one
-    drug per condition.
-    """
-    excluded: dict[str, set[str]] = {r: set() for r in formulary.risk_factor_ids}
+    """Reduce the formulary to EJ4's tables: contraindications and co-prescriptions per factor."""
+    contraindicated: dict[str, set[str]] = {r: set() for r in formulary.risk_factor_ids}
     for contraindication in formulary.contraindications:
-        excluded[contraindication.risk_factor_id].add(contraindication.drug_id)
+        contraindicated[contraindication.risk_factor_id].add(contraindication.drug_id)
+    companions: dict[str, set[tuple[str, str]]] = {r: set() for r in formulary.risk_factor_ids}
     for coprescription in formulary.coprescriptions:
-        excluded[coprescription.risk_factor_id].add(coprescription.drug_id)
+        companions[coprescription.risk_factor_id].add(
+            (coprescription.drug_id, coprescription.companion_drug_id)
+        )
     return _Tables(
         conditions=formulary.condition_ids,
         risk_factors=formulary.risk_factor_ids,
         candidates={c: tuple(sorted(formulary.candidates[c])) for c in formulary.condition_ids},
-        excluded_by={r: frozenset(drugs) for r, drugs in excluded.items()},
+        contraindicated_by={r: frozenset(drugs) for r, drugs in contraindicated.items()},
+        companions_under={r: tuple(sorted(pairs)) for r, pairs in companions.items()},
         interactions=frozenset(frozenset((i.drug_a, i.drug_b)) for i in formulary.interactions),
     )
 
 
-def _acceptable(tables: _Tables, condition_id: str, risk_factors: Iterable[str]) -> tuple[str, ...]:
-    """``Acc_c``: the candidates of a condition that no present risk factor excludes, sorted."""
+def _always_given(tables: _Tables, conditions: Iterable[str]) -> frozenset[str]:
+    """Return the drugs every regimen of these conditions gives: each one's only candidate."""
+    given: set[str] = set()
+    for condition_id in conditions:
+        if condition_id not in tables.candidates:
+            raise InstanceError(f"unknown condition {condition_id!r}")
+        if len(tables.candidates[condition_id]) == 1:
+            given.add(tables.candidates[condition_id][0])
+    return frozenset(given)
+
+
+def _acceptable(
+    tables: _Tables,
+    condition_id: str,
+    risk_factors: Iterable[str],
+    conditions: Iterable[str] = (),
+) -> tuple[str, ...]:
+    """``Acc_c``: the candidates of a condition that no present risk factor excludes (D23 exact).
+
+    A candidate is excluded by a contraindication of a present factor, or when it needs a companion
+    under a present factor and no condition in ``conditions`` has that companion as its only
+    candidate (so the companion is not given by every regimen of one drug per condition).
+    """
     if condition_id not in tables.candidates:
         raise InstanceError(f"unknown condition {condition_id!r}")
+    given = _always_given(tables, conditions)
     excluded: set[str] = set()
     for risk_factor in risk_factors:
-        if risk_factor not in tables.excluded_by:
+        if risk_factor not in tables.contraindicated_by:
             raise InstanceError(f"unknown risk factor {risk_factor!r}")
-        excluded |= tables.excluded_by[risk_factor]
+        excluded |= tables.contraindicated_by[risk_factor]
+        excluded |= {d for d, k in tables.companions_under[risk_factor] if k not in given}
     return tuple(d for d in tables.candidates[condition_id] if d not in excluded)
 
 
 def acceptable_drugs(
-    formulary: Formulary, condition_id: str, risk_factors: Iterable[str]
+    formulary: Formulary,
+    condition_id: str,
+    risk_factors: Iterable[str],
+    *,
+    conditions: Iterable[str] = (),
 ) -> tuple[str, ...]:
-    """Return ``Acc_c``, the candidates of a condition acceptable under the given risk factors.
+    """Return ``Acc_c``, the candidates of a condition acceptable for a patient.
 
-    A candidate is excluded if a present risk factor contraindicates it, or, by design decision
-    D23, if it needs a companion drug under a present risk factor (``coprescriptions.csv``; today
-    ibuprofen under AGE65).
+    A candidate is excluded if a present risk factor contraindicates it. Design decision D23
+    applies P1's co-prescription rule (axiom A5, ``coprescriptions.csv``) exactly within EJ4's
+    one-drug-per-condition model: a drug that needs a companion ``k`` under a present risk factor
+    is acceptable iff some condition of the patient has ``k`` as its only candidate, so every
+    regimen gives ``k``. Today: ibuprofen under AGE65 is acceptable iff GERD (whose only candidate
+    is omeprazole) is among the conditions.
 
     Parameters
     ----------
@@ -210,6 +255,9 @@ def acceptable_drugs(
         The condition.
     risk_factors
         The risk factors present.
+    conditions
+        Every condition of the patient (``condition_id`` may or may not be listed); the default,
+        no condition, makes every co-prescribed drug unacceptable under its risk factor.
 
     Returns
     -------
@@ -219,9 +267,9 @@ def acceptable_drugs(
     Raises
     ------
     InstanceError
-        If the condition or a risk factor is not in the formulary.
+        If the condition, a risk factor or one of ``conditions`` is not in the formulary.
     """
-    return _acceptable(_tables(formulary), condition_id, risk_factors)
+    return _acceptable(_tables(formulary), condition_id, risk_factors, conditions)
 
 
 def _safe_regimens(
@@ -267,9 +315,9 @@ def cheapest_safe_regimen(
 ) -> dict[str, str] | None:
     """Return ``R_0``, the cheapest safe regimen of a history, by brute force (design D21).
 
-    A safe regimen gives each condition one of its acceptable drugs (D23 included) with no
-    interacting pair. The cheapest minimises the total monthly cost; ties are broken by the sorted
-    tuple of drug identifiers.
+    A safe regimen gives each condition one of its acceptable drugs (D23 exact, judged on the
+    history's conditions) with no interacting pair. The cheapest minimises the total monthly cost;
+    ties are broken by the sorted tuple of drug identifiers.
 
     Parameters
     ----------
@@ -291,24 +339,26 @@ def cheapest_safe_regimen(
         If an identifier is not in the formulary or a candidate drug has no cost.
     """
     tables = _tables(formulary)
-    options = [_acceptable(tables, c, history.risk_factors) for c in history.conditions]
+    options = [
+        _acceptable(tables, c, history.risk_factors, history.conditions) for c in history.conditions
+    ]
     best = _cheapest(_safe_regimens(options, tables.interactions), _cost_table(tables, costs))
     return None if best is None else dict(zip(history.conditions, best, strict=True))
 
 
-def _cached_acceptable(
-    run: _Enumeration, condition_id: str, risk_factors: tuple[str, ...]
-) -> tuple[str, ...]:
-    key = (condition_id, risk_factors)
+def _cached_acceptable(run: _Enumeration, condition_id: str, state: _State) -> tuple[str, ...]:
+    """``Acc_c`` of one condition for a patient in ``state`` (sorted conditions, risk factors)."""
+    conditions, risk_factors = state
+    key = (condition_id, risk_factors, conditions)
     if key not in run.acceptable:
-        run.acceptable[key] = _acceptable(run.tables, condition_id, risk_factors)
+        run.acceptable[key] = _acceptable(run.tables, condition_id, risk_factors, conditions)
     return run.acceptable[key]
 
 
 def _cached_safe(run: _Enumeration, state: _State) -> tuple[_Regimen, ...]:
     if state not in run.safe:
-        conditions, risk_factors = state
-        options = [_cached_acceptable(run, c, risk_factors) for c in conditions]
+        conditions, _risk_factors = state
+        options = [_cached_acceptable(run, c, state) for c in conditions]
         run.safe[state] = tuple(_safe_regimens(options, run.tables.interactions))
     return run.safe[state]
 
@@ -348,10 +398,11 @@ def _outcome(
     run: _Enumeration, history: History, start_regimen: Mapping[str, str], event: Event
 ) -> _Outcome:
     """Classify one (history, event) pair and compute what the CSP would see."""
-    conditions, risk_factors = _state_after(history, event)
+    state = _state_after(history, event)
+    conditions, risk_factors = state
     start = {c: start_regimen.get(c) for c in conditions}
-    acceptable = {c: _cached_acceptable(run, c, risk_factors) for c in conditions}
-    finals = _cached_safe(run, (conditions, risk_factors))
+    acceptable = {c: _cached_acceptable(run, c, state) for c in conditions}
+    finals = _cached_safe(run, state)
     category = _classify(event, start, acceptable, finals, conditions)
     key: _CspKey = (
         conditions,
