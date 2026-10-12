@@ -18,6 +18,7 @@ from symbolic_ai.p2_ej4_transition.problem import (
     TransitionProblem,
     Value,
 )
+from symbolic_ai.p2_ej4_transition.synthetic import random_problem
 
 TOY_IDS = [answer.problem.problem_id for answer in ej4_toys.KNOWN_ANSWERS]
 
@@ -70,51 +71,6 @@ def knock_on_problem(taper_x1: int, washout_x1: int) -> TransitionProblem:
         washout_days={**pk, "x1": washout_x1},
         taper_days={**pk, "x1": taper_x1},
     )
-
-
-def random_problem(
-    rng: random.Random,
-    n_conditions: int,
-    max_pk: int,
-    *,
-    sizes: tuple[int, ...] = (2, 3),
-    density: float = 0.25,
-) -> TransitionProblem:
-    """A random problem with a safe starting regimen; the last condition is the new one.
-
-    ``sizes``: possible numbers of candidates per condition; ``density``: probability that two
-    drugs of different conditions interact; ``max_pk``: largest washout and taper days.
-    """
-    while True:
-        conditions = tuple(f"C{i}" for i in range(n_conditions))
-        candidates = {
-            c: tuple(f"{c.lower()}{j}" for j in range(rng.choice(sizes))) for c in conditions
-        }
-        drugs = sorted(d for c in conditions for d in candidates[c])
-        start = {c: candidates[c][0] for c in conditions[:-1]} | {conditions[-1]: None}
-        interactions = frozenset(
-            frozenset((a, b))
-            for a, b in itertools.combinations(drugs, 2)
-            if a[:2] != b[:2] and rng.random() < density
-        )
-        regimen = [d for d in start.values() if d is not None]
-        if any(frozenset(pair) in interactions for pair in itertools.combinations(regimen, 2)):
-            continue
-        return TransitionProblem(
-            problem_id="random",
-            event=Event(EventKind.NEW_CONDITION, conditions[-1]),
-            conditions=conditions,
-            risk_factors=(),
-            start=start,
-            candidates=candidates,
-            acceptable={
-                c: tuple(d for d in candidates[c] if rng.random() < 0.7) or (candidates[c][-1],)
-                for c in conditions
-            },
-            interactions=interactions,
-            washout_days={d: rng.randint(0, max_pk) for d in drugs},
-            taper_days={d: rng.randint(0, max_pk) for d in drugs},
-        )
 
 
 @pytest.mark.parametrize("answer", ej4_toys.KNOWN_ANSWERS, ids=TOY_IDS)
@@ -185,6 +141,19 @@ def test_oracle_never_switches_to_a_contraindicated_drug() -> None:
         assert ("x1", 0) not in targets - {state.values[0]}
 
 
+def test_days_left_reset_to_the_washout_and_count_down_one_a_day() -> None:
+    # x1 (washout 3) is last given on day 0, so it is present through day 3 and y1 waits to day 4.
+    search = DailyStateProblem(knock_on_problem(taper_x1=0, washout_x1=3))
+    assert search.result(search.initial, (("x1", 0), None)).days_left == (("x1", 3),)
+    states = [search.initial]
+    for _ in range(3):
+        states.append(search.result(states[-1], (("x2", 0), None)))
+    assert [state.days_left for state in states] == [(("x1", 3),), (("x1", 2),), (("x1", 1),), ()]
+    start_y1 = (("x2", 0), ("y1", 0))
+    assert start_y1 not in search.actions(states[2])
+    assert start_y1 in search.actions(states[3])
+
+
 def test_no_acceptable_drug_is_impossible() -> None:
     problem = ej4_toys._x_only("none-acceptable", (), taper={"x1": 2}, washout={"x1": 3})
     assert oracle_min_horizon(problem).status == "impossible"
@@ -227,7 +196,7 @@ def test_aima_breadth_first_graph_search_agrees() -> None:
     # The same search problem solved by aima's own BFS (3rd ed. Fig. 3.11) has the same depth.
     rng = random.Random(7)
     problems = [answer.problem for answer in ej4_toys.KNOWN_ANSWERS] + [worked_example()]
-    problems += [random_problem(rng, n, max_pk=3) for n in (2, 3, 4) for _ in range(10)]
+    problems += [random_problem(rng, n) for n in (2, 3, 4) for _ in range(10)]
     for problem in problems:
         node = breadth_first_graph_search(DailyStateProblem(problem))
         assert (None if node is None else node.depth) == oracle_min_horizon(problem).h_star
@@ -237,7 +206,7 @@ def test_random_witnesses_pass_the_checker() -> None:
     rng = random.Random(11)
     for n in (2, 3, 4, 5):
         for _ in range(15):
-            problem = random_problem(rng, n, max_pk=4)
+            problem = random_problem(rng, n, max_washout=4, max_taper=4)
             result = oracle_min_horizon(problem)
             assert result.status in {"found", "impossible"}
             if result.schedule is not None:
@@ -278,7 +247,9 @@ def test_brute_force_over_the_checker_agrees_on_toys(answer: ej4_toys.KnownAnswe
 def test_brute_force_over_the_checker_agrees_on_random_problems() -> None:
     rng = random.Random(3)
     for _ in range(40):
-        problem = random_problem(rng, 2, max_pk=2, sizes=(2,), density=0.5)
+        problem = random_problem(
+            rng, 2, p_interaction=0.5, max_washout=2, max_taper=2, max_candidates=2
+        )
         h_star = oracle_min_horizon(problem).h_star
         expected = h_star if h_star is not None and h_star <= 3 else None
         assert _brute_force_min_horizon(problem, 3) == expected
