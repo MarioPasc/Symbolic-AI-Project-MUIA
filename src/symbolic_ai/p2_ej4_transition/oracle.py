@@ -1,19 +1,20 @@
 """Independent oracle of EJ4: the minimum horizon H* by breadth-first search over daily states.
 
 The oracle does not build the CSP. It treats the transition as a search problem in the sense of
-AIMA (4th ed. §3.1): a state is one *day* (what each condition gets today and which stopped drugs
-are still in the body), an action is what to give tomorrow, and the goal is a safe regimen. Every
-action costs one day, so breadth-first search (AIMA 4th ed. §3.4.1, Fig. 3.9; 3rd ed. Fig. 3.11)
-reaches a goal in the fewest days: the depth of the first goal found is H*. If the reachable
-states run out without a goal, no transition exists at any horizon. The rules come from the
-design in words (§1, §4.2, §4.3 "equivalent reading" of I), never from the CSP model (§6.2).
+AIMA (4th ed. §3.1): a state is one *day* (what each condition gets today and how many more days
+each drug in the body stays there), an action is what to give tomorrow, and the goal is a safe
+regimen. Every action costs one day, so breadth-first search (AIMA 4th ed. §3.4.1, Fig. 3.9; 3rd
+ed. Fig. 3.11) reaches a goal in the fewest days: the depth of the first goal found is H*. If the
+reachable states run out without a goal, no transition exists at any horizon. The rules come from
+the design in words (§1, §4.2, §4.3 "equivalent reading" of I), never from the CSP model (§6.2).
+The search problem has aima's ``Problem`` interface; the search loop is the oracle's own.
 """
 
 from __future__ import annotations
 
 import itertools
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Literal, NamedTuple, TypeAlias
 
@@ -43,14 +44,15 @@ class DailyState(NamedTuple):
     ----------
     values
         What each condition gets today, in ``problem.conditions`` order.
-    washout_left
-        For every drug *not* given today but still in the body, the number of days after today on
-        which it is still present, as sorted ``(drug_id, days)`` pairs with ``days >= 1``. A drug
-        given today is not listed: it stays present for its ``w_d`` days after today.
+    days_left
+        Every drug in the body today with the number of days after today on which it is still
+        present, as sorted ``(drug_id, days)`` pairs. A drug given today has its washout ``w_d``;
+        each day every count goes down by one. Only counts ``>= 1`` are listed, so the listed
+        drugs are exactly those still present tomorrow.
     """
 
     values: DayValues
-    washout_left: tuple[tuple[str, int], ...]
+    days_left: tuple[tuple[str, int], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,14 +80,17 @@ class OracleResult:
 class DailyStateProblem:
     """The transition as a search problem over daily states (AIMA 4th ed. §3.1).
 
-    It has the interface of ``aima.search.Problem`` (``initial``, ``actions``, ``result``,
-    ``goal_test``, ``path_cost``) without subclassing it, because the vendored copy is untyped;
-    ``aima.search.breadth_first_graph_search`` accepts it unchanged.
+    It implements the interface of ``aima.search.Problem`` (``initial``, ``actions``,
+    ``result``, ``goal_test``, ``path_cost``) without subclassing it, because the vendored copy is
+    untyped. :func:`oracle_min_horizon` searches it with its own budgeted loop; aima's
+    ``breadth_first_graph_search`` also accepts it unchanged, which the tests use to check the
+    depth of the goals found.
 
-    - Initial state: day 0, the regimen before the event, nothing else in the body.
+    - Initial state: day 0, the regimen before the event; nothing else is in the body.
     - Actions: the values of every condition tomorrow allowed by the transition and domain rules
       for each condition, whose drugs do not interact with what is present tomorrow.
-    - Result: tomorrow's state, with the days of presence left updated.
+    - Result: tomorrow's state; every count of days left goes down by one, and each drug given
+      tomorrow is set to its washout.
     - Goal test: every condition on an acceptable drug at full dose.
     - Path cost: one per day.
 
@@ -97,11 +102,9 @@ class DailyStateProblem:
 
     def __init__(self, problem: TransitionProblem) -> None:
         self.problem = problem
-        day0: list[Value] = []
-        for condition in problem.conditions:
-            drug = problem.start[condition]
-            day0.append(None if drug is None else (drug, 0))
-        self.initial = DailyState(tuple(day0), ())
+        starts = [problem.start[condition] for condition in problem.conditions]
+        day0 = tuple(None if drug is None else (drug, 0) for drug in starts)
+        self.initial = DailyState(day0, self._count_down((), day0))
 
     def actions(self, state: DailyState) -> list[DayValues]:
         """Return tomorrow's allowed values for every condition, in a fixed order."""
@@ -109,18 +112,12 @@ class DailyStateProblem:
             self._next_values(condition, value)
             for condition, value in zip(self.problem.conditions, state.values, strict=True)
         ]
-        left = self._days_left_after_today(state)
-        return [values for values in itertools.product(*options) if self.is_safe(values, left)]
+        still_present = [drug for drug, _ in state.days_left]
+        return [v for v in itertools.product(*options) if self.is_safe(v, still_present)]
 
     def result(self, state: DailyState, action: DayValues) -> DailyState:
         """Return tomorrow's state when ``action`` is given tomorrow."""
-        given = {drug_of(value) for value in action}
-        still_present = sorted(
-            (drug, days - 1)
-            for drug, days in self._days_left_after_today(state).items()
-            if days >= 2 and drug not in given
-        )
-        return DailyState(action, tuple(still_present))
+        return DailyState(action, self._count_down(state.days_left, action))
 
     def goal_test(self, state: DailyState) -> bool:
         """Rule *final*: every condition on an acceptable drug at full dose."""
@@ -160,39 +157,40 @@ class DailyStateProblem:
         allowed = set(problem.acceptable[condition]) | {start}
         return [v for v in nexts if v is None or v[0] in allowed]
 
-    def _days_left_after_today(self, state: DailyState) -> dict[str, int]:
-        """Days after today on which each drug in the body today is still present.
+    def _count_down(
+        self, days_left: tuple[tuple[str, int], ...], values: DayValues
+    ) -> tuple[tuple[str, int], ...]:
+        """Move the counts of days left one day forward, to the day on which ``values`` is given.
 
-        A drug given today (any phase) is present for its ``w_d`` days after today: last given on
-        day ``t``, it is present through day ``t + w_d`` inclusive. A drug not given today keeps
-        the count carried in the state.
+        Every count goes down by one; each drug given that day is then set to its washout ``w_d``
+        (last given on day ``t``, a drug is present through day ``t + w_d`` inclusive). Counts
+        that reach zero are dropped.
         """
-        left = dict(state.washout_left)
-        for value in state.values:
-            drug = drug_of(value)
+        left = {drug: days - 1 for drug, days in days_left}
+        for drug in map(drug_of, values):
             if drug is not None:
                 left[drug] = self.problem.washout_days[drug]
-        return left
+        return tuple(sorted((drug, days) for drug, days in left.items() if days >= 1))
 
-    def is_safe(self, values: DayValues, left_after_today: Mapping[str, int]) -> bool:
+    def is_safe(self, values: DayValues, still_present: Collection[str]) -> bool:
         """Rule *interaction* on a day: no drug given that day interacts with a drug present.
 
         Parameters
         ----------
         values
             What each condition gets that day.
-        left_after_today
-            Days of presence left after the previous day, per drug (empty for day 0: nothing
-            but the regimen before the event is in the body).
+        still_present
+            The drugs given on earlier days that are still in the body that day (none on day 0:
+            nothing but the regimen before the event is in the body).
 
         Returns
         -------
         bool
             Whether no drug given that day interacts with a drug present that day: one given
-            that day or one with at least one day of presence left after the previous day.
+            that day or one still present from earlier days.
         """
         given = {drug for drug in map(drug_of, values) if drug is not None}
-        present = given | {drug for drug, days in left_after_today.items() if days >= 1}
+        present = given | set(still_present)
         return not any(
             a != b and frozenset((a, b)) in self.problem.interactions
             for a in given
@@ -207,14 +205,15 @@ def oracle_min_horizon(
 
     Breadth-first graph search with the goal test applied when a state is generated (AIMA 4th ed.
     §3.4.1, Fig. 3.9; ``aima.search.breadth_first_graph_search``, 3rd ed. Fig. 3.11): the first goal
-    generated is at the smallest depth, and depth is days, so it is H*. The loop is that of aima's
-    function, which is not called directly because it has no budget: it can neither stop at
-    ``max_states`` expansions or at depth ``h_max`` nor tell an exhausted search from a cut one.
-    Two changes: the search stops at the budget, and the states already reached are kept in a
-    dictionary (``state -> parent``), so a membership test is constant-time instead of a scan of
-    the frontier. :class:`DailyStateProblem` is accepted unchanged by aima's function, and the
-    tests check that both give the same depth. States are expanded and actions generated in a
-    fixed order, so the result and the witness are deterministic.
+    generated is at the smallest depth, and depth is days, so it is H*. This is the oracle's own
+    loop, written after aima's function and not a call to it, because aima's has no budget: it
+    can neither stop at ``max_states`` expansions or at depth ``h_max`` nor tell an exhausted
+    search from a cut one. It differs from aima's in two ways: it stops at the budget, and the
+    states already reached are kept in a dictionary (``state -> parent``), so a membership test
+    is constant-time instead of a scan of the frontier. Aima's function accepts
+    :class:`DailyStateProblem` unchanged, and the tests check that it finds goals at the same
+    depth. States are expanded and actions generated in a fixed order, so the result and the
+    witness are deterministic.
 
     Parameters
     ----------
@@ -242,7 +241,7 @@ def oracle_min_horizon(
         raise VerificationError(f"h_max and max_states must be >= 0, got {h_max}, {max_states}")
     search = DailyStateProblem(problem)
     root = search.initial
-    if not search.is_safe(root.values, {}):
+    if not search.is_safe(root.values, ()):
         # Day 0 is fixed, and rule interaction holds on every day, day 0 included.
         return OracleResult(None, "impossible", 0, None)
     if search.goal_test(root):
