@@ -22,7 +22,8 @@ conda run -n symai python -c "import aima.logic, symbolic_ai; print('ok')"
 
 ## Reproduce every result of the report
 
-One command runs the experiments of EJ1, EJ2 and EJ3, in that order, from the repository root:
+One command runs the experiments of EJ1, EJ2 and EJ3 (the report) and EJ4 (the slides of
+Práctica 2), in that order, from the repository root:
 
 ```bash
 conda activate symai
@@ -36,9 +37,9 @@ Measured on a 24-core workstation with `--workers 12`: EJ1 9 s, EJ2 23 s, EJ3 88
 2 minutes in total. Every file is byte-identical for any `--workers` (only `provenance` records the
 git commit).
 
-Options: `--only ej1 ej3` runs a subset; `--out-root DIR` writes to `DIR/ej{1,2,3}` instead of
-`outputs/ej{1,2,3}`; `--data-dir PATH` uses another database; `--workers N` goes to EJ1 and EJ3
-(EJ2 runs in one process); `--report-figures DIR` also copies the report's figure PDFs into `DIR`
+Options: `--only ej1 ej3` runs a subset; `--out-root DIR` writes to `DIR/ej{1,2,3,4}` instead of
+`outputs/ej{1,2,3,4}`; `--data-dir PATH` uses another database; `--workers N` goes to EJ1 and EJ3
+(EJ2 and EJ4 run in one process); `--no-oracle` goes to EJ2 and EJ4 (see their sections); `--report-figures DIR` also copies the report's figure PDFs into `DIR`
 under the names the report's LaTeX uses (`ej1_value_ordering.pdf`, `ej2_ontology.pdf`,
 `ej2_taxonomy_a.pdf`, `ej2_taxonomy_b.pdf`).
 
@@ -56,6 +57,7 @@ Files written (`outputs/` is git-ignored):
 | EJ1 | `outputs/ej1/results.json`, `outputs/ej1/fig_ej1_value_ordering.{pdf,png}` |
 | EJ2 | `outputs/ej2/results.json`, `outputs/ej2/fig_ej2_ontology{,_inferred}.{dot,pdf,png}`, `outputs/ej2/fig_ej2_taxonomy_{a,b}.{dot,pdf,png}` |
 | EJ3 | `outputs/ej3/results.json` |
+| EJ4 | `outputs/ej4/results.json`, `outputs/ej4/timings.json`, `outputs/ej4/fig_ej4_gantt{,_extended}.{pdf,png}`, `outputs/ej4/tab_ej4_{domains_h11,domains_h12,r2,r3}.tex` |
 
 Where each table and figure of the report comes from:
 
@@ -190,6 +192,49 @@ the searches themselves take seconds. Each run also reports its solution depth d
 b*, the root of N + 1 = 1 + b* + ... + (b*)^d for the N nodes generated (AIMA 4th ed. §3.6.1),
 averaged per configuration and per number of conditions.
 
+## Run — EJ4, the safe transition between two regimens (CSP, Práctica 2)
+
+EJ4 is EJ1 in time. A patient on a safe regimen gets a new risk factor or a new condition, and the
+regimen has to change, but not at once: a stopped drug stays in the body for some days (washout)
+and keeps interacting, some drugs must be tapered before they stop, and a treated condition is
+never left untreated. EJ4 finds the day-by-day regimen that reaches a safe one in the fewest days,
+H*. The washout and taper days are a table of their own (`data/formulary/pharmacokinetics.csv`,
+data 1.3.0: illustrative values, not clinical ones).
+
+- **Variables** `(condition, day)` for days 0..H; **values** a drug at full dose, a drug on day k
+  of its taper, or untreated (only for a newly diagnosed condition). **Constraints**, all binary:
+  the transition rule between consecutive days of a condition, and no interacting pair present on
+  the same day (washouts included).
+- **Solver** (`aima.csp`, called unchanged): node consistency, AC-3, then backtracking with
+  forward checking and MRV (the main configuration); the horizon loop solves H = 0, 1, 2, ... and
+  the first solvable H is H* (the infeasible run at H* - 1 is the proof).
+- **Validation**, independent of the CSP: a checker that replays the rules day by day and an
+  oracle that searches the daily states breadth-first.
+
+```bash
+conda activate symai
+
+python -m symbolic_ai.p2_ej4_transition.main --worked-example        # R1 as text
+python -m symbolic_ai.p2_ej4_transition.main --list --category knock_on
+python -m symbolic_ai.p2_ej4_transition.main --problem 'DEP|LIVER|+cond:PAIN'
+python -m symbolic_ai.p2_ej4_transition.main --experiments           # R1, R2, R3 (about 65 s)
+python -m symbolic_ai.p2_ej4_transition.main --experiments --no-oracle   # R2 without the oracle
+
+# equivalently, the console script declared in pyproject.toml:
+symai-ej4 --worked-example
+```
+
+`--experiments` writes to `outputs/ej4` (`--out-dir DIR` elsewhere):
+
+| file | content |
+|---|---|
+| `results.json` | schema `symai.ej4.results/1`, byte-identical across runs (no times): `r1` (the worked example `DEP|LIVER|+cond:PAIN`: data rows, domains before and after AC-3 at H = 11 and 12, the emptied domain, the trace and the schedule), `r2` (CSP against oracle and checker on the 3,723 distinct problems; targeted mutations per checker rule), `census`, `context` (H* counted in events), `r3` (plain BT, BT + FC, BT + FC + MRV and the main configuration at H* - 1 and H* on the worked example and on `DEP+GERD+HTN+PAIN+T2D|-|+rf:LIVER`, with a budget of 1,000,000 assignments; min-conflicts), `extended_case`, `provenance` |
+| `timings.json` | wall-clock time of each phase and each R3 run (machine-dependent) |
+| `fig_ej4_gantt.{pdf,png}`, `fig_ej4_gantt_extended.{pdf,png}` | the schedules as Gantt charts, sized for a 16:9 slide |
+| `tab_ej4_domains_h11.tex`, `tab_ej4_domains_h12.tex`, `tab_ej4_r2.tex`, `tab_ej4_r3.tex` | booktabs fragments to `\input` in the beamer slides (need `booktabs` and `xcolor`); the first line of the domain and R3 tables is the caption-ready legend |
+
+Labels of the figures and tables are Spanish, from one dictionary (`tables.LABELS_ES`).
+
 ## Test
 
 ```bash
@@ -216,7 +261,8 @@ python -m symbolic_ai.dataloader.validate          # check data/ against its sch
 │       ├── viz/                      shared IEEE figure style for every exercise
 │       ├── p1_ej1_logic/             EJ1: the SAT prescribing agent (this practical's core)
 │       ├── p1_ej2_ontology/          EJ2: ontology, forward chaining, HermiT oracle, figure
-│       └── p1_ej3_search/            EJ3: the cost-aware agent (A* for the cheapest regimen)
+│       ├── p1_ej3_search/            EJ3: the cost-aware agent (A* for the cheapest regimen)
+│       └── p2_ej4_transition/        EJ4: the safe transition between regimens (CSP by day)
 └── tests/                            mirrors src/symbolic_ai/
 ```
 
@@ -243,6 +289,12 @@ in its docstring.
   Approach* (4th ed.), best-first search Fig. 3.7, uniform-cost search §3.4.2, greedy search §3.5.1,
   A* and consistency §3.5.2, IDA* §3.5.5, heuristics from relaxed problems §3.6.2, and one
   condition branched per node as in backtracking search for CSPs §5.3.
+- EJ4: aima-python's `CSP`, `AC3`, `backtracking_search`, `first_unassigned_variable`,
+  `num_legal_values`, `unordered_domain_values`, `lcv`, `no_inference`, `forward_checking`, `mac`
+  and `min_conflicts` (same vendored copy), called unchanged, and its `breadth_first_graph_search`
+  loop for the oracle. Constraint satisfaction follows ch. 5 of *Artificial Intelligence: A Modern
+  Approach* (4th ed.): AC-3 §5.2, backtracking, ordering and inference §5.3, min-conflicts §5.4;
+  bounded planning as a CSP, 3rd ed. §10.4.3.
 - **owlready2** 0.51, https://pypi.org/project/owlready2/ (J.-B. Lamy, *Artificial Intelligence in
   Medicine* 80, 2017), LGPL-3.0-or-later, with the bundled **HermiT** 1.3.8 OWL 2 reasoner
   (B. Glimm, I. Horrocks, B. Motik, G. Stoilos, Z. Wang, *J. Automated Reasoning* 53(3), 2014),
