@@ -283,16 +283,15 @@ def test_tracing_does_not_change_the_run() -> None:
         )
 
 
-def test_trace_of_plain_backtracking_shows_rejections_and_backtracks() -> None:
+def test_trace_of_plain_backtracking_shows_assignments_and_backtracks() -> None:
     trace: list[TraceEvent] = []
     config = SolverConfig("none", "static", "keep_first", False)
     run = solve_horizon(worked_example(), 11, config, trace)
     assert run.status == "infeasible"
     assert [e.step for e in trace] == list(range(len(trace)))
-    assigned = [e for e in trace if e.kind == "try" and e.detail == "assigned"]
-    rejected = [e for e in trace if e.kind == "try" and e.detail.startswith("rejected")]
-    assert len(assigned) == run.stats.assignments
-    assert rejected
+    tries = [e for e in trace if e.kind == "try"]
+    assert len(tries) == run.stats.assignments  # one "try" per assignment
+    assert {e.detail for e in tries} == {"assigned"}
     assert trace[-1].kind == "backtrack"
     assert trace[-1].variable == ("DEP", 0)  # the search gave up at the first variable
 

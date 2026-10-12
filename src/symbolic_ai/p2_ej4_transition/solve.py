@@ -233,9 +233,10 @@ class TraceEvent:
         Position of the event in the trace (0, 1, 2, ...).
     kind
         ``"ac3"``: the AC-3 preprocessing removed ``value`` from ``variable``. ``"select"``: the
-        search chose ``variable``. ``"try"``: the search considered ``value`` for ``variable``;
-        ``detail`` says whether it was assigned or rejected by the check against the assigned
-        neighbours. ``"prune"``: forward checking or MAC removed ``value`` from ``variable``.
+        search chose ``variable``. ``"try"``: the search assigned ``value`` to ``variable`` (the
+        value passed aima's check against the assigned neighbours; with forward checking or MAC
+        every value left in a domain passes it). ``"prune"``: forward checking or MAC removed
+        ``value`` from ``variable``.
         ``"wipeout"``: the domain of ``variable`` became empty. ``"backtrack"``: every value of
         ``variable`` failed, so the search goes back. ``"solution"``: every variable is assigned.
     variable
@@ -288,9 +289,8 @@ def solve_horizon(
         If ``horizon`` is negative.
     """
     csp = build_csp(problem, horizon)
-    tracer = _Tracer(trace)
     started = time.perf_counter()
-    status, assignment, ac3_removed = _search(csp, config, tracer, started + config.timeout_s)
+    status, assignment, ac3_removed = _search(csp, config, trace, started + config.timeout_s)
     stats = RunStats(
         assignments=csp.nassigns,
         checks=csp.nchecks,
@@ -366,7 +366,7 @@ def ac3_domains(problem: TransitionProblem, horizon: int) -> tuple[bool, Domains
         If ``horizon`` is negative.
     """
     csp = build_csp(problem, horizon)
-    consistent, _removed = _preprocess(csp, _Tracer(None))
+    consistent, _removed = _preprocess(csp, None)
     return consistent, {v: tuple(csp.curr_domains[v]) for v in csp.variables}
 
 
@@ -417,20 +417,20 @@ def solve_min_conflicts(
 
 
 def _search(
-    csp: Any, config: SolverConfig, tracer: _Tracer, deadline: float
+    csp: Any, config: SolverConfig, trace: list[TraceEvent] | None, deadline: float
 ) -> tuple[RunStatus, _Assignment | None, int]:
     """Run AC-3 (if configured), then aima's backtracking; return status, solution, removals."""
     ac3_removed = 0
     if config.ac3_preprocess:
-        consistent, ac3_removed = _preprocess(csp, tracer)
+        consistent, ac3_removed = _preprocess(csp, trace)
         if not consistent:
             return "infeasible", None, ac3_removed
     try:
         assignment = aima_csp.backtracking_search(
             csp,
-            select_unassigned_variable=_variable_selector(config, tracer, deadline),
-            order_domain_values=_value_orderer(config, tracer),
-            inference=_inference(config, tracer),
+            select_unassigned_variable=_variable_selector(config, trace, deadline),
+            order_domain_values=_value_orderer(config, trace),
+            inference=_inference(config, trace),
         )
     except SolverTimeoutError:
         return "timeout", None, ac3_removed
@@ -438,7 +438,7 @@ def _search(
         return "budget", None, ac3_removed
     if assignment is None:
         return "infeasible", None, ac3_removed
-    tracer.add("solution", None, None, f"all {len(assignment)} variables assigned")
+    _record(trace, "solution", None, None, f"all {len(assignment)} variables assigned")
     return "solved", assignment, ac3_removed
 
 
@@ -449,33 +449,26 @@ def _schedule(csp: Any, assignment: _Assignment | None) -> dict[Variable, Value]
     return {v: assignment[v] for v in csp.variables}
 
 
-class _Tracer:
-    """Appends :class:`TraceEvent` objects to a list (or does nothing without one).
-
-    ``offered`` is the (variable, value) the value order last handed to aima's search. aima only
-    calls the inference function for a value that passed the check against the assigned
-    neighbours, and the inference wrapper clears ``offered``; so if it is still set when the
-    search asks for the next value, that value was rejected by the check.
-    """
-
-    def __init__(self, events: list[TraceEvent] | None) -> None:
-        self.events = events
-        self.offered: tuple[Variable, Value] | None = None
-
-    def add(self, kind: TraceKind, variable: Variable | None, value: Value, detail: str) -> None:
-        """Append one event (if tracing)."""
-        if self.events is not None:
-            self.events.append(TraceEvent(len(self.events), kind, variable, value, detail))
+def _record(
+    trace: list[TraceEvent] | None,
+    kind: TraceKind,
+    variable: Variable | None,
+    value: Value,
+    detail: str,
+) -> None:
+    """Append one event to ``trace``; do nothing when the run is not traced."""
+    if trace is not None:
+        trace.append(TraceEvent(len(trace), kind, variable, value, detail))
 
 
-def _preprocess(csp: Any, tracer: _Tracer) -> tuple[bool, int]:
+def _preprocess(csp: Any, trace: list[TraceEvent] | None) -> tuple[bool, int]:
     """Run aima's AC-3 on the whole CSP; return whether it is consistent and the values removed."""
     removals: _Removals = []
     consistent, _checks = _ac3(csp, removals=removals)
     for variable, value in removals:
-        tracer.add("ac3", variable, value, "no support left in a neighbour's domain")
+        _record(trace, "ac3", variable, value, "no support left in a neighbour's domain")
     if not consistent:
-        tracer.add("wipeout", _emptied(csp), None, "AC-3 emptied this domain: no solution")
+        _record(trace, "wipeout", _emptied(csp), None, "AC-3 emptied this domain: no solution")
     return bool(consistent), len(removals)
 
 
@@ -517,7 +510,7 @@ class _AssignmentBudgetError(SolverError):
 
 
 def _variable_selector(
-    config: SolverConfig, tracer: _Tracer, deadline: float
+    config: SolverConfig, trace: list[TraceEvent] | None, deadline: float
 ) -> Callable[[_Assignment, Any], Variable]:
     """Return the variable-selection function of the configuration, with the timeout check."""
 
@@ -534,7 +527,7 @@ def _variable_selector(
             variable = _mrv(assignment, csp)
         else:
             variable = aima_csp.first_unassigned_variable(assignment, csp)
-        tracer.add("select", variable, None, f"{len(csp.choices(variable))} values left")
+        _record(trace, "select", variable, None, f"{len(csp.choices(variable))} values left")
         return variable
 
     return select
@@ -551,24 +544,23 @@ def _mrv(assignment: _Assignment, csp: Any) -> Variable:
 
 
 def _value_orderer(
-    config: SolverConfig, tracer: _Tracer
+    config: SolverConfig, trace: list[TraceEvent] | None
 ) -> Callable[[Variable, _Assignment, Any], Iterator[Value]]:
-    """Return the value-order function of the configuration, which also traces each value."""
+    """Return the value-order function of the configuration.
+
+    It hands aima's search the values one at a time; when they run out (aima's ``backtrack``
+    leaves its loop with no solution), it records the backtrack in the trace.
+    """
     order = aima_csp.lcv if config.value_order == "lcv" else aima_csp.unordered_domain_values
 
     def values(variable: Variable, assignment: _Assignment, csp: Any) -> Iterator[Value]:
-        for value in list(order(variable, assignment, csp)):
-            tracer.offered = (variable, value)
-            yield value
-            if tracer.offered == (variable, value):
-                tracer.add("try", variable, value, "rejected: conflicts with an assigned neighbour")
-            tracer.offered = None
-        tracer.add("backtrack", variable, None, "every value failed: undo and go back")
+        yield from list(order(variable, assignment, csp))
+        _record(trace, "backtrack", variable, None, "every value failed: undo and go back")
 
     return values
 
 
-def _inference(config: SolverConfig, tracer: _Tracer) -> _InferenceFunction:
+def _inference(config: SolverConfig, trace: list[TraceEvent] | None) -> _InferenceFunction:
     """Return the inference function of the configuration, which also traces its prunings."""
     infer: _InferenceFunction = {
         "none": aima_csp.no_inference,
@@ -579,14 +571,13 @@ def _inference(config: SolverConfig, tracer: _Tracer) -> _InferenceFunction:
     def traced(
         csp: Any, variable: Variable, value: Value, assignment: _Assignment, removals: _Removals
     ) -> bool:
-        tracer.offered = None
-        tracer.add("try", variable, value, "assigned")
+        _record(trace, "try", variable, value, "assigned")
         already_removed = len(removals)  # backtracking's suppose() put the other values there
         consistent = infer(csp, variable, value, assignment, removals)
         for pruned_variable, pruned_value in removals[already_removed:]:
-            tracer.add("prune", pruned_variable, pruned_value, f"inconsistent with {value}")
+            _record(trace, "prune", pruned_variable, pruned_value, f"inconsistent with {value}")
         if not consistent:
-            tracer.add("wipeout", _emptied(csp), None, "empty domain: try the next value")
+            _record(trace, "wipeout", _emptied(csp), None, "empty domain: try the next value")
         return bool(consistent)
 
     return traced
