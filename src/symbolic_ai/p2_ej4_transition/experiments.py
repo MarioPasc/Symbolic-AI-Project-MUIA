@@ -10,6 +10,10 @@
   deterministic assignment budget; and min-conflicts, which can find a schedule but never prove
   that there is none (design §7 R3).
 - **Context numbers.** The distribution of H* counted in events, by event kind and category.
+- **Design v2.3 rows.** R2 adds the same three-way agreement on a synthetic batch
+  (``synthetic.random_problems``) and checks each category against the solved H*; R3 adds the real
+  knock-on population at ``H* - 1`` under a 100,000-assignment budget and the search effort on the
+  synthetic batch. Continuity with EJ3 (``instances.continuity_with_ej3``) is run by ``main.py``.
 
 Every function is pure and returns frozen records; ``main.py`` writes them. Wall-clock times are
 kept apart from the deterministic numbers (:attr:`AlgorithmRun.seconds` is not serialised).
@@ -20,6 +24,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import statistics
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -39,20 +44,27 @@ from symbolic_ai.p2_ej4_transition.solve import (
     MAIN_CONFIG,
     HorizonRun,
     SolverConfig,
+    TraceEvent,
     TransitionResult,
     find_min_horizon,
     solve_horizon,
     solve_min_conflicts,
 )
+from symbolic_ai.p2_ej4_transition.synthetic import Coverage, coverage, random_problems
 
 __all__ = [
     "DESIGN_CENSUS",
     "EXTENDED_CASE_ID",
     "MUTATIONS",
+    "POPULATION_BUDGET",
     "R3_BUDGET",
     "R3_CONFIGS",
     "R3_TIMEOUT_S",
+    "SYNTHETIC_COUNT",
+    "SYNTHETIC_H_MAX",
+    "SYNTHETIC_SEED",
     "AlgorithmRun",
+    "CategoryAgreement",
     "CheckerSummary",
     "ContextNumbers",
     "Disagreement",
@@ -61,8 +73,12 @@ __all__ = [
     "Mutation",
     "MutationSummary",
     "OracleComparison",
+    "PopulationRow",
+    "SolvedEntry",
+    "SyntheticResult",
     "ValidationResult",
     "census_matches_design",
+    "check_categories",
     "context_numbers",
     "entries_in_category",
     "find_entry",
@@ -74,8 +90,11 @@ __all__ = [
     "mutate_start_early",
     "mutate_untreated_day",
     "run_algorithm_table",
+    "run_knock_on_population",
     "run_min_conflicts_rows",
+    "run_synthetic",
     "run_validation",
+    "solve_entries",
 ]
 
 logger = logging.getLogger(__name__)
@@ -305,6 +324,9 @@ class ValidationResult:
         One summary per mutation, in :data:`MUTATIONS` order.
     context
         The distribution of H* (design §7, context numbers).
+    three_way_agree
+        Problems on which the CSP and the oracle agree and the checker accepts the CSP's schedule
+        (if any), or ``None`` without the oracle.
     """
 
     problems: int
@@ -314,6 +336,26 @@ class ValidationResult:
     checker: CheckerSummary
     mutations: tuple[MutationSummary, ...]
     context: ContextNumbers
+    three_way_agree: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SolvedEntry:
+    """One real problem and its horizon loop with the main configuration (shared by R2 and R3).
+
+    Parameters
+    ----------
+    entry
+        The entry of ``instances.enumerate_problems``.
+    problem
+        Its problem (never ``None``: ``REFER`` entries are not solved).
+    result
+        The horizon loop's result.
+    """
+
+    entry: ProblemEntry
+    problem: TransitionProblem
+    result: TransitionResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -362,11 +404,36 @@ class AlgorithmRun:
 # --- R2 -----------------------------------------------------------------------------------------
 
 
+def solve_entries(
+    entries: Sequence[ProblemEntry], config: SolverConfig = MAIN_CONFIG
+) -> tuple[SolvedEntry, ...]:
+    """Run the horizon loop on every non-``REFER`` entry, in order.
+
+    Parameters
+    ----------
+    entries
+        Entries of ``instances.enumerate_problems`` (``REFER`` ones are skipped).
+    config
+        The solver configuration (default: the main one).
+
+    Returns
+    -------
+    tuple[SolvedEntry, ...]
+        One record per problem.
+    """
+    return tuple(
+        SolvedEntry(entry, problem, find_min_horizon(problem, config))
+        for entry in entries
+        if (problem := entry.problem) is not None
+    )
+
+
 def run_validation(
     entries: Sequence[ProblemEntry],
     *,
     use_oracle: bool = True,
     config: SolverConfig = MAIN_CONFIG,
+    solved_entries: Sequence[SolvedEntry] | None = None,
 ) -> ValidationResult:
     """Run R2 on every non-``REFER`` entry (design §7 R2).
 
@@ -378,39 +445,45 @@ def run_validation(
         Whether to compare with the oracle (it dominates the run time).
     config
         The solver configuration (default: the main one).
+    solved_entries
+        The horizon loops of ``entries`` already run (:func:`solve_entries` with ``config``), to
+        share them with the other experiments; ``None`` runs them here.
 
     Returns
     -------
     ValidationResult
         The comparison, the checker, the mutations and the distribution of H*.
     """
-    runs = [
-        (entry, problem, find_min_horizon(problem, config))
-        for entry in entries
-        if (problem := entry.problem) is not None
-    ]
+    if solved_entries is None:
+        solved_entries = solve_entries(entries, config)
+    runs = [(s.entry, s.problem, s.result) for s in solved_entries]
     solved = [
         (problem, result.schedule, result.h_star)
         for _entry, problem, result in runs
         if result.schedule is not None and result.h_star is not None
     ]
     statuses = Counter(result.status for _entry, _problem, result in runs)
+    checker = _check_all(solved)
+    oracle, agreeing = _compare_with_oracle(runs) if use_oracle else (None, frozenset[str]())
     return ValidationResult(
         problems=len(runs),
         events=sum(len(entry.occurrences) for entry, _problem, _result in runs),
         csp_status_counts=tuple(sorted(statuses.items())),
-        oracle=_compare_with_oracle(runs) if use_oracle else None,
-        checker=_check_all(solved),
+        oracle=oracle,
+        checker=checker,
         mutations=tuple(_run_mutation(m, solved) for m in MUTATIONS),
         context=context_numbers((entry, result) for entry, _problem, result in runs),
+        three_way_agree=None if oracle is None else len(agreeing - set(checker.invalid)),
     )
 
 
 def _compare_with_oracle(
     runs: Sequence[tuple[ProblemEntry, TransitionProblem, TransitionResult]],
-) -> OracleComparison:
-    """Compare each CSP H* with the oracle's (default state budget)."""
-    compared = agree = exhausted = 0
+) -> tuple[OracleComparison, frozenset[str]]:
+    """Compare each CSP H* with the oracle's (default state budget); also the agreeing ids."""
+    compared = 0
+    agreeing: set[str] = set()
+    exhausted = 0
     disagreements: list[Disagreement] = []
     for _entry, problem, result in runs:
         oracle = oracle_min_horizon(problem)
@@ -421,14 +494,17 @@ def _compare_with_oracle(
         both_found = oracle.status == "found" and result.status == "solved"
         both_none = oracle.status == "impossible" and result.status == "no_transition_within_h_max"
         if (both_found and oracle.h_star == result.h_star) or both_none:
-            agree += 1
+            agreeing.add(problem.problem_id)
             continue
         disagreements.append(
             Disagreement(
                 problem.problem_id, result.status, result.h_star, oracle.status, oracle.h_star
             )
         )
-    return OracleComparison(len(runs), compared, agree, exhausted, tuple(disagreements))
+    comparison = OracleComparison(
+        len(runs), compared, len(agreeing), exhausted, tuple(disagreements)
+    )
+    return comparison, frozenset(agreeing)
 
 
 def _check_all(solved: Sequence[tuple[TransitionProblem, Schedule, int]]) -> CheckerSummary:
@@ -843,3 +919,351 @@ def entries_in_category(
         The entries whose category is ``category``.
     """
     return tuple(e for e in entries if e.category is category)
+
+
+# --- R2 and R3 extensions (design v2.3) ----------------------------------------------------------
+
+#: The synthetic batch of R2 and R3 (design §7: the slow seed of the cross-validation test).
+SYNTHETIC_SEED = 2027
+SYNTHETIC_COUNT = 1500
+#: The last horizon the main configuration tries on synthetic problems (their largest H* is 16).
+SYNTHETIC_H_MAX = 20
+#: The budget of every run of R3's knock-on population row (design §7 R3).
+POPULATION_BUDGET = 100_000
+
+
+@dataclass(frozen=True, slots=True)
+class CategoryAgreement:
+    """Whether the category of each real problem agrees with its solved H* (design §5, §7 R2).
+
+    A trivial problem must have H* = 0; a forced-only one H* >= 1; a knock-on one H* >= 1 and a
+    schedule that ends with a different drug for some condition whose start drug is still
+    acceptable (the knock-on change itself).
+
+    Parameters
+    ----------
+    category
+        ``trivial``, ``forced_only`` or ``knock_on``.
+    entries
+        Problems of the category.
+    agree
+        Problems whose H* (and schedule) agree with the category.
+    h_stars
+        ``(H*, problems)`` pairs, by H* (``None``: no transition found).
+    disagreements
+        The problem identifiers that do not agree.
+    """
+
+    category: str
+    entries: int
+    agree: int
+    h_stars: tuple[tuple[int | None, int], ...]
+    disagreements: tuple[str, ...]
+
+
+def check_categories(solved_entries: Sequence[SolvedEntry]) -> tuple[CategoryAgreement, ...]:
+    """Check every category against the solved H* (design §7 R2, "categories").
+
+    Parameters
+    ----------
+    solved_entries
+        The horizon loops of the real problems (:func:`solve_entries`).
+
+    Returns
+    -------
+    tuple[CategoryAgreement, ...]
+        One record per category that occurs, in ``Category`` order.
+    """
+    rows = []
+    for category in Category:
+        members = [s for s in solved_entries if s.entry.category is category]
+        if not members:
+            continue
+        disagree = tuple(s.problem.problem_id for s in members if not _category_holds(s))
+        h_stars = Counter(s.result.h_star for s in members)
+        rows.append(
+            CategoryAgreement(
+                category=category.value,
+                entries=len(members),
+                agree=len(members) - len(disagree),
+                h_stars=tuple(sorted(h_stars.items(), key=lambda item: _none_last(item[0]))),
+                disagreements=disagree,
+            )
+        )
+    return tuple(rows)
+
+
+def _category_holds(solved: SolvedEntry) -> bool:
+    """Whether one problem's H* and schedule agree with its category (see CategoryAgreement)."""
+    h_star, schedule = solved.result.h_star, solved.result.schedule
+    if solved.entry.category is Category.TRIVIAL:
+        return h_star == 0
+    if h_star is None or h_star == 0 or schedule is None:
+        return False
+    if solved.entry.category is Category.FORCED_ONLY:
+        return True
+    problem = solved.problem
+    return any(
+        problem.start[c] in problem.acceptable[c]
+        and drug_of(schedule[c, h_star]) != problem.start[c]
+        for c in problem.conditions
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class SyntheticResult:
+    """The three-way agreement on synthetic problems (R2) and their search effort (R3 row).
+
+    Parameters
+    ----------
+    seed, count, h_max
+        The batch (``synthetic.random_problems(seed, count)``) and the main configuration's last
+        horizon.
+    coverage
+        What the batch exercises (``synthetic.coverage``).
+    oracle_statuses, csp_statuses
+        How many problems ended with each status of the oracle and of the horizon loop.
+    compared
+        Problems the oracle finished.
+    agree
+        Compared problems on which the CSP gives the oracle's H* (or no transition).
+    checker_schedules, checker_valid
+        CSP schedules checked, and those with no violation.
+    three_way_agree
+        Compared problems on which the CSP agrees with the oracle and the checker accepts its
+        schedule (if any).
+    disagreements
+        One line per problem where any of the three disagree.
+    h_star_histogram
+        ``(H*, problems)`` pairs of the CSP, by H* (``None``: no transition within ``h_max``).
+    with_h_star_minus_one
+        Solved problems with ``H* >= 1`` (those with a horizon ``H* - 1`` to refute).
+    ac3_decides_before
+        Those whose run at ``H* - 1`` is infeasible with 0 assignments: AC-3 alone refutes it.
+    solved
+        Problems the CSP solved.
+    backtracking
+        The identifiers of the solved problems whose run at H* backtracks at least once.
+    median_assignments, max_assignments
+        Assignments of the run at H*, over the solved problems.
+    max_assignments_id
+        The problem with the most assignments at H* (the first one on ties), or ``None``.
+    """
+
+    seed: int
+    count: int
+    h_max: int
+    coverage: Coverage
+    oracle_statuses: tuple[tuple[str, int], ...]
+    csp_statuses: tuple[tuple[str, int], ...]
+    compared: int
+    agree: int
+    checker_schedules: int
+    checker_valid: int
+    three_way_agree: int
+    disagreements: tuple[str, ...]
+    h_star_histogram: tuple[tuple[int | None, int], ...]
+    with_h_star_minus_one: int
+    ac3_decides_before: int
+    solved: int
+    backtracking: tuple[str, ...]
+    median_assignments: float
+    max_assignments: int
+    max_assignments_id: str | None
+
+
+def run_synthetic(
+    seed: int = SYNTHETIC_SEED, count: int = SYNTHETIC_COUNT, h_max: int = SYNTHETIC_H_MAX
+) -> SyntheticResult:
+    """Compare CSP, oracle and checker on a synthetic batch, and measure the search at H*.
+
+    The agreement is that of ``tests/p2_ej4_transition/test_cross_validation.py``: when the
+    oracle finishes, the CSP (main configuration, horizons ``0..h_max``) returns its H* if it is
+    at most ``h_max`` and "no transition" otherwise, and the checker accepts every CSP schedule.
+    The run at H* is repeated with a trace to see whether the search backtracks (design §7 R3).
+
+    Parameters
+    ----------
+    seed
+        The seed of ``synthetic.random_problems``.
+    count
+        The number of problems.
+    h_max
+        The main configuration's last horizon.
+
+    Returns
+    -------
+    SyntheticResult
+        The agreement, the coverage and the effort.
+    """
+    problems = random_problems(seed, count)
+    oracle_statuses: Counter[str] = Counter()
+    csp_statuses: Counter[str] = Counter()
+    histogram: Counter[int | None] = Counter()
+    compared = agree = schedules = valid = three_way = 0
+    disagreements: list[str] = []
+    effort: list[tuple[int, str]] = []
+    with_before = decided = 0
+    backtracking: list[str] = []
+    for problem in problems:
+        oracle = oracle_min_horizon(problem)
+        result = find_min_horizon(problem, MAIN_CONFIG, h_max=h_max)
+        oracle_statuses[oracle.status] += 1
+        csp_statuses[result.status] += 1
+        histogram[result.h_star] += 1
+        checked = _synthetic_check(problem, result)
+        schedules += checked is not None
+        valid += checked is True
+        if oracle.status == "budget_exhausted":
+            disagreements.append(f"{problem.problem_id}: the oracle ran out of budget")
+            continue
+        compared += 1
+        found = oracle.h_star is not None and oracle.h_star <= h_max
+        expected = (oracle.h_star, "solved") if found else (None, "no_transition_within_h_max")
+        same = (result.h_star, result.status) == expected
+        agree += same
+        three_way += same and checked is not False
+        if not same or checked is False:
+            disagreements.append(
+                f"{problem.problem_id}: CSP {result.h_star} ({result.status}), oracle "
+                f"{oracle.h_star} ({oracle.status}), checker {checked}"
+            )
+        if result.h_star is None:
+            continue
+        effort.append((result.runs[-1].stats.assignments, problem.problem_id))
+        if result.h_star >= 1:
+            with_before += 1
+            before = result.runs[result.h_star - 1]
+            decided += before.status == "infeasible" and before.stats.assignments == 0
+        if _backtracks(problem, result.h_star):
+            backtracking.append(problem.problem_id)
+    assignments = [a for a, _id in effort]
+    most = max(effort, key=lambda item: item[0], default=None)
+    return SyntheticResult(
+        seed=seed,
+        count=count,
+        h_max=h_max,
+        coverage=coverage(problems),
+        oracle_statuses=tuple(sorted(oracle_statuses.items())),
+        csp_statuses=tuple(sorted(csp_statuses.items())),
+        compared=compared,
+        agree=agree,
+        checker_schedules=schedules,
+        checker_valid=valid,
+        three_way_agree=three_way,
+        disagreements=tuple(disagreements),
+        h_star_histogram=tuple(sorted(histogram.items(), key=lambda item: _none_last(item[0]))),
+        with_h_star_minus_one=with_before,
+        ac3_decides_before=decided,
+        solved=len(effort),
+        backtracking=tuple(backtracking),
+        median_assignments=float(statistics.median(assignments)) if assignments else 0.0,
+        max_assignments=most[0] if most else 0,
+        max_assignments_id=most[1] if most else None,
+    )
+
+
+def _synthetic_check(problem: TransitionProblem, result: TransitionResult) -> bool | None:
+    """Whether the checker accepts the CSP's schedule (``None`` when there is no schedule)."""
+    if result.schedule is None or result.h_star is None:
+        return None
+    return not check_schedule(problem, result.schedule, result.h_star)
+
+
+def _backtracks(problem: TransitionProblem, horizon: int) -> bool:
+    """Whether the main configuration's search at ``horizon`` records a backtrack."""
+    trace: list[TraceEvent] = []
+    solve_horizon(problem, horizon, MAIN_CONFIG, trace)
+    return any(event.kind == "backtrack" for event in trace)
+
+
+@dataclass(frozen=True, slots=True)
+class PopulationRow:
+    """One configuration on every real knock-on problem at ``H* - 1`` (design §7 R3).
+
+    Parameters
+    ----------
+    configuration
+        The configuration's key in :data:`R3_CONFIGS`.
+    label
+        Its label.
+    budget
+        The assignment budget of each run.
+    entries
+        Problems run.
+    statuses
+        How many runs ended with each status.
+    median_assignments, max_assignments
+        Assignments over the runs. A run stopped by the budget has more than ``budget``: the
+        budget is checked when the next variable is chosen, so values tried meanwhile count.
+    budget_hits
+        Runs stopped by the budget.
+    seconds
+        Wall-clock time of all the runs; machine-dependent, so left out of :meth:`to_dict`.
+    """
+
+    configuration: str
+    label: str
+    budget: int
+    entries: int
+    statuses: tuple[tuple[str, int], ...]
+    median_assignments: float
+    max_assignments: int
+    budget_hits: int
+    seconds: float
+
+    def to_dict(self) -> dict[str, object]:
+        """Return the deterministic fields as a JSON-ready ``dict`` (no seconds)."""
+        content = dataclasses.asdict(self)
+        del content["seconds"]
+        return content
+
+
+def run_knock_on_population(
+    solved_entries: Sequence[SolvedEntry],
+    configs: Sequence[tuple[str, SolverConfig]] = R3_CONFIGS,
+    budget: int = POPULATION_BUDGET,
+) -> tuple[PopulationRow, ...]:
+    """Run each configuration at ``H* - 1`` on every real knock-on problem (design §7 R3).
+
+    Parameters
+    ----------
+    solved_entries
+        The horizon loops of the real problems (:func:`solve_entries`); the knock-on ones with
+        ``H* >= 1`` are run.
+    configs
+        ``(key, configuration)`` pairs; each is run with ``max_assignments = budget``.
+    budget
+        The assignment budget of every run.
+
+    Returns
+    -------
+    tuple[PopulationRow, ...]
+        One row per configuration, in order.
+    """
+    targets = [
+        (s.problem, s.result.h_star - 1)
+        for s in solved_entries
+        if s.entry.category is Category.KNOCK_ON and s.result.h_star
+    ]
+    rows = []
+    for key, config in configs:
+        budgeted = dataclasses.replace(config, max_assignments=budget)
+        runs = [solve_horizon(problem, horizon, budgeted) for problem, horizon in targets]
+        assignments = [run.stats.assignments for run in runs]
+        statuses = Counter(run.status for run in runs)
+        rows.append(
+            PopulationRow(
+                configuration=key,
+                label=config.label,
+                budget=budget,
+                entries=len(runs),
+                statuses=tuple(sorted(statuses.items())),
+                median_assignments=float(statistics.median(assignments)) if runs else 0.0,
+                max_assignments=max(assignments, default=0),
+                budget_hits=statuses["budget"],
+                seconds=sum(run.stats.seconds for run in runs),
+            )
+        )
+        logger.info("R3 population %s: %d budget hits", key, statuses["budget"])
+    return tuple(rows)
