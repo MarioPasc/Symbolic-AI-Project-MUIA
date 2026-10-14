@@ -9,15 +9,28 @@ import pytest
 
 from symbolic_ai.dataloader import load_drug_costs, load_formulary, load_pharmacokinetics
 from symbolic_ai.p2_ej4_transition import EJ4_DATA_VERSION, SolverError, TransitionProblem
+from symbolic_ai.p2_ej4_transition.experiments import R3_CONFIGS
 from symbolic_ai.p2_ej4_transition.instances import case_study_problem
-from symbolic_ai.p2_ej4_transition.solve import ac3_domains
+from symbolic_ai.p2_ej4_transition.oracle import oracle_min_horizon
+from symbolic_ai.p2_ej4_transition.solve import (
+    MAIN_CONFIG,
+    SolverConfig,
+    ac3_domains,
+    solve_horizon,
+)
 from symbolic_ai.p2_ej4_transition.worked_example import (
     ScheduleTable,
+    Walkthrough,
     WorkedExample,
+    build_walkthrough,
     build_worked_example,
+    daily_state_graph,
     horizon_domains,
     instance_data,
+    miniature_problem,
+    search_tree,
     value_text,
+    walkthrough_text,
 )
 
 
@@ -208,3 +221,277 @@ def test_instance_data_without_contraindications() -> None:
 )
 def test_value_text(value: tuple[str, int] | None, text: str) -> None:
     assert value_text(value) == text
+
+
+# --- the miniature of the slides (slides-and-guide.md §3, frozen numbers) -----------------------
+
+S, S1, M = ("sertraline", 0), ("sertraline", 1), ("mirtazapine", 0)
+IBU, TRA = ("ibuprofen", 0), ("tramadol", 0)
+
+
+@pytest.fixture(scope="module")
+def miniature(case_study: TransitionProblem) -> TransitionProblem:
+    """The case study with every washout 1 day and every taper 0 days except sertraline's 1."""
+    return miniature_problem(case_study)
+
+
+@pytest.fixture(scope="module")
+def walk(miniature: TransitionProblem) -> Walkthrough:
+    """The walkthrough of the miniature, with the formulary's contraindications."""
+    return build_walkthrough(miniature, load_formulary(version=EJ4_DATA_VERSION).contraindications)
+
+
+@pytest.mark.integration
+def test_miniature_shortens_every_washout_and_taper(
+    case_study: TransitionProblem, miniature: TransitionProblem
+) -> None:
+    assert miniature.problem_id == "DEP|LIVER|+cond:PAIN|miniature"
+    assert dict(miniature.washout_days) == dict.fromkeys(case_study.washout_days, 1)
+    assert dict(miniature.taper_days) == {
+        drug: 1 if drug == "sertraline" else 0 for drug in case_study.taper_days
+    }
+    for field in ("conditions", "start", "candidates", "acceptable", "interactions", "event"):
+        assert getattr(miniature, field) == getattr(case_study, field)
+
+
+@pytest.mark.integration
+def test_miniature_h_star_is_3_for_csp_oracle_and_checker(walk: Walkthrough) -> None:
+    assert (walk.h_star, walk.oracle_h_star, walk.state_graph.h_star) == (3, 3, 3)
+    assert walk.violations == ()
+    assert walk.schedule.row("DEP") == (S, S1, M, M)
+    assert walk.schedule.row("PAIN") == (None, None, None, IBU)
+
+
+@pytest.mark.integration
+def test_miniature_horizon_loop(walk: Walkthrough) -> None:
+    rows = [
+        (s.run.horizon, s.run.status, s.run.assignments, s.run.checks, s.run.ac3_removed)
+        for s in walk.loop
+    ]
+    assert rows == [
+        (0, "infeasible", 0, 0, 0),
+        (1, "infeasible", 0, 4, 2),
+        (2, "infeasible", 0, 22, 6),
+        (3, "solved", 8, 124, 9),
+    ]
+    assert [(s.node_emptied, s.ac3_emptied) for s in walk.loop] == [
+        (("PAIN", 0), None),
+        (None, ("PAIN", 1)),
+        (None, ("DEP", 1)),
+        (None, None),
+    ]
+
+
+@pytest.mark.integration
+def test_miniature_node_consistent_domains(walk: Walkthrough) -> None:
+    dep_middle, pain_middle = (S, S1, M), (IBU, TRA, None)
+    expected = {
+        2: {
+            ("DEP", 0): (S,),
+            ("PAIN", 0): (None,),
+            ("DEP", 1): dep_middle,
+            ("PAIN", 1): pain_middle,
+            ("DEP", 2): (S, M),
+            ("PAIN", 2): (IBU, TRA),
+        },
+        3: {
+            ("DEP", 0): (S,),
+            ("PAIN", 0): (None,),
+            ("DEP", 1): dep_middle,
+            ("PAIN", 1): pain_middle,
+            ("DEP", 2): dep_middle,
+            ("PAIN", 2): pain_middle,
+            ("DEP", 3): (S, M),
+            ("PAIN", 3): (IBU, TRA),
+        },
+    }
+    assert [d.horizon for d in walk.domains] == [2, 3]
+    for domains in walk.domains:
+        cells = {(c.condition_id, c.day): c.node_consistent for c in domains.cells}
+        assert cells == expected[domains.horizon]
+
+
+@pytest.mark.integration
+def test_miniature_ac3_at_h2_ends_in_the_wipe_out_of_dep_day_1(walk: Walkthrough) -> None:
+    ac3 = walk.ac3[0]
+    assert ac3.horizon == 2
+    assert [(r.order, r.variable, r.value, r.neighbour, r.constraint) for r in ac3.removals] == [
+        (1, ("PAIN", 1), IBU, ("DEP", 0), "I"),
+        (2, ("PAIN", 1), TRA, ("DEP", 0), "I"),
+        (3, ("DEP", 1), M, ("DEP", 0), "T"),
+        (4, ("DEP", 2), S, ("PAIN", 2), "I"),
+        (5, ("DEP", 1), S, ("PAIN", 2), "I"),
+        (6, ("DEP", 1), S1, ("PAIN", 2), "I"),
+    ]
+    assert ac3.emptied == ("DEP", 1)
+    assert walk.domains[0].cell("DEP", 1).after_ac3 == ()
+
+
+@pytest.mark.integration
+def test_miniature_ac3_at_h3_leaves_only_the_analgesic_open(walk: Walkthrough) -> None:
+    ac3 = walk.ac3[1]
+    assert ac3.horizon == 3
+    assert [(r.variable, r.value, r.neighbour, r.constraint) for r in ac3.removals] == [
+        (("PAIN", 1), IBU, ("DEP", 0), "I"),
+        (("PAIN", 1), TRA, ("DEP", 0), "I"),
+        (("DEP", 1), M, ("DEP", 0), "T"),
+        (("DEP", 3), S, ("PAIN", 3), "I"),
+        (("DEP", 2), S, ("PAIN", 3), "I"),
+        (("DEP", 2), S1, ("PAIN", 3), "I"),
+        (("PAIN", 2), IBU, ("DEP", 1), "I"),
+        (("PAIN", 2), TRA, ("DEP", 1), "I"),
+        (("DEP", 1), S, ("DEP", 2), "T"),
+    ]
+    assert ac3.emptied is None
+    h3 = walk.domains[1]
+    assert [h3.cell("DEP", day).after_ac3 for day in range(4)] == [(S,), (S1,), (M,), (M,)]
+    assert [h3.cell("PAIN", day).after_ac3 for day in range(4)] == [
+        (None,),
+        (None,),
+        (None,),
+        (IBU, TRA),
+    ]
+
+
+@pytest.mark.integration
+def test_miniature_configuration_table(walk: Walkthrough) -> None:
+    table = [
+        (row.key, [(r.status, r.assignments, r.checks, r.ac3_removed) for r in row.runs])
+        for row in walk.configurations
+    ]
+    assert table == [
+        ("bt", [("infeasible", 8, 41, 0), ("solved", 17, 120, 0)]),
+        ("bt_fc", [("infeasible", 4, 19, 0), ("solved", 13, 101, 0)]),
+        ("bt_fc_mrv", [("infeasible", 5, 27, 0), ("solved", 13, 108, 0)]),
+        ("main", [("infeasible", 0, 22, 6), ("solved", 8, 124, 9)]),
+    ]
+    assert [row.label for row in walk.configurations] == [c.label for _k, c in R3_CONFIGS]
+
+
+@pytest.mark.integration
+def test_miniature_plain_bt_tree_has_17_assignments(walk: Walkthrough) -> None:
+    assigned = [(s.number, s.variable, s.value) for s in walk.bt_tree if s.kind == "assign"]
+    order = [
+        (("DEP", 0), S),
+        (("PAIN", 0), None),
+        (("DEP", 1), S),
+        (("PAIN", 1), None),
+        (("DEP", 2), S),
+        (("PAIN", 2), None),
+        (("DEP", 3), S),
+        (("DEP", 2), S1),
+        (("PAIN", 2), None),
+        (("DEP", 3), M),
+        (("DEP", 1), S1),
+        (("PAIN", 1), None),
+        (("DEP", 2), M),
+        (("PAIN", 2), None),
+        (("DEP", 3), S),
+        (("DEP", 3), M),
+        (("PAIN", 3), IBU),
+    ]
+    assert assigned == [(n, v, x) for n, (v, x) in enumerate(order, start=1)]
+    assert walk.bt_tree[-1].kind == "solution"
+    # The first dead end (after assignment 7): both analgesics meet sertraline on day 3, and
+    # mirtazapine cannot follow full-dose sertraline (T).
+    after_7 = walk.bt_tree[[s.number for s in walk.bt_tree].index(7) + 1 :][:5]
+    assert [(s.kind, s.variable, s.value) for s in after_7] == [
+        ("reject", ("PAIN", 3), IBU),
+        ("reject", ("PAIN", 3), TRA),
+        ("backtrack", ("PAIN", 3), None),
+        ("reject", ("DEP", 3), M),
+        ("backtrack", ("DEP", 3), None),
+    ]
+    assert after_7[0].reason == "I with DEP day 2 = sertraline, I with DEP day 3 = sertraline"
+    assert after_7[3].reason == "T with DEP day 2 = sertraline"
+
+
+@pytest.mark.integration
+def test_miniature_main_search_is_a_straight_path(walk: Walkthrough) -> None:
+    assert [s.kind for s in walk.main_path] == ["assign"] * 8 + ["solution"]
+    assert [s.depth for s in walk.main_path[:8]] == list(range(8))
+    assert walk.main_path[7].variable == ("PAIN", 3)
+    assert walk.main_path[7].value == IBU
+
+
+@pytest.mark.integration
+def test_miniature_daily_state_graph(walk: Walkthrough, miniature: TransitionProblem) -> None:
+    graph = walk.state_graph
+    states = {n.label: (n.depth, n.state.values, n.state.days_left) for n in graph.states}
+    assert states == {
+        "A": (0, (S, None), (("sertraline", 1),)),
+        "B": (1, (S1, None), (("sertraline", 1),)),
+        "C": (2, (M, None), (("mirtazapine", 1),)),
+        "D": (3, (M, IBU), (("ibuprofen", 1), ("mirtazapine", 1))),
+        "E": (3, (M, TRA), (("mirtazapine", 1), ("tramadol", 1))),
+    }
+    assert [(e.source, e.target, e.kind) for e in graph.edges] == [
+        ("A", "A", "repeated"),
+        ("A", "B", "new"),
+        ("B", "C", "new"),
+        ("C", "C", "repeated"),
+        ("C", "D", "goal"),
+        ("C", "E", "goal"),
+        ("C", "A", "repeated"),
+    ]
+    oracle = oracle_min_horizon(miniature)
+    assert graph.states_expanded == oracle.states_expanded == 3
+    assert graph.path == ("A", "B", "C", "D")
+    witness = {
+        (condition, day): value
+        for day, label in enumerate(graph.path)
+        for condition, value in zip(graph.conditions, states[label][1], strict=True)
+    }
+    assert witness == oracle.schedule
+    assert [walk.schedule.rows[i][day] for day in range(4) for i in range(2)] == [
+        witness[c, day] for day in range(4) for c in graph.conditions
+    ]
+
+
+@pytest.mark.integration
+def test_miniature_text_is_deterministic(walk: Walkthrough, miniature: TransitionProblem) -> None:
+    text = walkthrough_text(walk)
+    assert text == walkthrough_text(
+        build_walkthrough(miniature, load_formulary(version=EJ4_DATA_VERSION).contraindications)
+    )
+    assert "H* = 3 (CSP), 3 (oracle); schedule (checker: valid):" in text
+    assert "   5. DEP day 1 - sertraline: no support in PAIN day 2 (constraint I)" in text
+
+
+# --- the walkthrough's pieces on the toys -------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "toy",
+    [k for k in ej4_toys.KNOWN_ANSWERS if k.h_star is not None],
+    ids=lambda k: k.problem.problem_id,
+)
+def test_daily_state_graph_agrees_with_the_oracle(toy: ej4_toys.KnownAnswer) -> None:
+    graph = daily_state_graph(toy.problem)
+    oracle = oracle_min_horizon(toy.problem)
+    assert (graph.h_star, graph.states_expanded) == (oracle.h_star, oracle.states_expanded)
+    assert len(graph.path) == (oracle.h_star or 0) + 1
+
+
+@pytest.mark.parametrize("key_config", R3_CONFIGS, ids=[k for k, _c in R3_CONFIGS])
+@pytest.mark.parametrize(
+    "toy",
+    [k for k in ej4_toys.KNOWN_ANSWERS if k.h_star is not None],
+    ids=lambda k: k.problem.problem_id,
+)
+def test_search_tree_numbers_every_assignment(
+    toy: ej4_toys.KnownAnswer, key_config: tuple[str, SolverConfig]
+) -> None:
+    _key, config = key_config
+    assert toy.h_star is not None
+    for horizon in range(toy.h_star + 1):
+        run = solve_horizon(toy.problem, horizon, config)
+        steps = search_tree(toy.problem, horizon, config)
+        numbers = [s.number for s in steps if s.kind == "assign"]
+        assert numbers == list(range(1, run.stats.assignments + 1))
+        assert (steps[-1].kind == "solution") == (run.status == "solved")
+
+
+def test_main_config_never_lists_rejections() -> None:
+    steps = search_tree(ej4_toys.T2.problem, ej4_toys.T2.h_star or 0, MAIN_CONFIG)
+    assert all(s.kind != "reject" for s in steps)

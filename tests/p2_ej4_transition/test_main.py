@@ -92,6 +92,32 @@ def test_problem_prints_h_star_and_schedule(capsys: pytest.CaptureFixture[str]) 
     assert last_day == ["12", "mirtazapine", "ibuprofen"]
 
 
+@pytest.mark.parametrize(
+    "argv", [["--miniature", "--list"], ["--problem", CASE_STUDY_ID, "--miniature"]]
+)
+def test_miniature_needs_worked_example(argv: list[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(argv)
+    assert excinfo.value.code == 2
+
+
+@pytest.mark.integration
+def test_worked_example_miniature_prints_the_walkthrough(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert cli.main(["--worked-example", "--miniature"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("=== miniature worked example DEP|LIVER|+cond:PAIN|miniature ===")
+    assert (
+        "  H = 2: infeasible, 0 assignments, 22 checks, 6 removed by AC-3; AC-3 empties DEP day 1"
+        in out
+    )
+    assert "  3 states expanded; first goal at depth 3; witness path A -> B -> C -> D" in out
+    assert out.rstrip().endswith("3 mirtazapine   ibuprofen")
+    assert cli.main(["--worked-example", "--miniature"]) == 0
+    assert capsys.readouterr().out == out  # deterministic
+
+
 @pytest.mark.integration
 def test_unknown_problem_exits_with_1(capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main(["--problem", "no such problem"]) == 1

@@ -7,7 +7,7 @@ pharmacokinetics through :mod:`symbolic_ai.dataloader` (data 1.3.0) and has four
   and the LaTeX tables, written to ``--out-dir`` with a deterministic ``results.json`` (no times;
   they go to ``timings.json``);
 - ``--worked-example``: R1 as text (domains at ``H* - 1`` and ``H*``, the emptied domain, the
-  schedule);
+  schedule); with ``--miniature``, the step-by-step miniature of the slides instead;
 - ``--problem ID``: solve one problem with the main configuration and print its schedule;
 - ``--list``: the problem identifiers, optionally of one category.
 
@@ -87,9 +87,12 @@ from symbolic_ai.p2_ej4_transition.worked_example import (
     HorizonDomains,
     ScheduleTable,
     WorkedExample,
+    build_walkthrough,
     build_worked_example,
     instance_data,
+    miniature_problem,
     value_text,
+    walkthrough_text,
 )
 
 __all__ = ["RESULTS_SCHEMA", "build_arg_parser", "main"]
@@ -138,7 +141,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     -------
     argparse.ArgumentParser
         Parser for ``(--experiments | --worked-example | --problem ID | --list)
-        [--category CATEGORY] [--out-dir DIR] [--data-dir PATH] [--no-oracle]``.
+        [--miniature] [--category CATEGORY] [--out-dir DIR] [--data-dir PATH] [--no-oracle]``.
     """
     parser = argparse.ArgumentParser(
         prog="python -m symbolic_ai.p2_ej4_transition.main",
@@ -161,6 +164,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--problem", metavar="ID", help="Solve one problem with the main configuration."
     )
     mode.add_argument("--list", action="store_true", help="List the problem identifiers.")
+    parser.add_argument(
+        "--miniature",
+        action="store_true",
+        help="With --worked-example: print the miniature of the slides instead (the case study "
+        "with every washout 1 d and every taper 0 d except sertraline's 1 d, H* = 3) step by "
+        "step: horizon loop, domains, AC-3 removals with their arcs, configurations, search "
+        "tree, the oracle's daily states, schedule.",
+    )
     parser.add_argument(
         "--category", choices=_LISTABLE, help="With --list: only the problems of this category."
     )
@@ -616,6 +627,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.category is not None and not args.list:
         parser.error("--category needs --list")
+    if args.miniature and not args.worked_example:
+        parser.error("--miniature needs --worked-example")
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     try:
         if args.experiments:
@@ -623,6 +636,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         formulary, costs, pharmacokinetics = _load(args.data_dir)
         if args.worked_example:
             problem = case_study_problem(formulary, costs, pharmacokinetics)
+            if args.miniature:
+                miniature = miniature_problem(problem)
+                print(walkthrough_text(build_walkthrough(miniature, formulary.contraindications)))
+                return 0
             _print_worked_example(build_worked_example(problem, formulary.contraindications))
             return 0
         entries = enumerate_problems(formulary, costs, pharmacokinetics)
