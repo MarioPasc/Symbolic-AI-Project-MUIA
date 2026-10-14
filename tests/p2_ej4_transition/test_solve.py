@@ -518,3 +518,67 @@ def test_default_config_has_no_budget() -> None:
 def test_negative_budget_raises() -> None:
     with pytest.raises(SolverError):
         SolverConfig(max_assignments=-1)
+
+
+# --- AC-3 names the arc of each removal (the miniature of the slides) ---------------------------
+
+
+@pytest.mark.parametrize(
+    ("horizon", "status", "removed", "checks"),
+    [(11, "infeasible", 116, 1234), (12, "solved", 133, 2264)],
+)
+def test_naming_the_arcs_changes_no_removal_and_no_count(
+    horizon: int, status: str, removed: int, checks: int
+) -> None:
+    # Before: aima's AC-3 with the plain arc queue; after: the traced run, whose queue logs arcs.
+    plain: list[tuple[Variable, Value]] = []
+    consistent, plain_checks = aima_csp.AC3(
+        build_csp(worked_example(), horizon), removals=plain, arc_heuristic=solve._arc_order
+    )
+    trace: list[TraceEvent] = []
+    run = solve_horizon(worked_example(), horizon, MAIN_CONFIG, trace)
+    assert [(e.variable, e.value) for e in trace if e.kind == "ac3"] == plain
+    assert (run.status, len(plain), run.stats.ac3_removed, run.stats.checks) == (
+        status,
+        removed,
+        removed,
+        checks,
+    )
+    if not consistent:
+        assert plain_checks == checks  # the run stopped right after AC-3
+
+
+@pytest.mark.parametrize("horizon", [11, 12])
+def test_each_ac3_removal_has_no_support_in_the_neighbour_it_names(horizon: int) -> None:
+    # Replay the removals on the node-consistent domains: when a value is removed, no value left
+    # in the named neighbour's domain may satisfy the constraint with it.
+    problem = worked_example()
+    domains = {v: list(d) for v, d in node_consistent_domains(problem, horizon).items()}
+    neighbours = build_csp(problem, horizon).neighbors
+    check = csp_builder.constraint_function(problem)
+    trace: list[TraceEvent] = []
+    solve_horizon(problem, horizon, MAIN_CONFIG, trace)
+    for event in trace:
+        if event.kind != "ac3":
+            assert event.neighbour is None
+            continue
+        variable, neighbour = event.variable, event.neighbour
+        assert variable is not None and neighbour is not None
+        assert neighbour in neighbours[variable]
+        assert not any(check(variable, event.value, neighbour, y) for y in domains[neighbour])
+        assert event.detail.endswith(f"(constraint {solve.arc_constraint(variable, neighbour)})")
+        domains[variable].remove(event.value)
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "expected"),
+    [
+        (("DEP", 1), ("DEP", 2), "T"),
+        (("DEP", 2), ("DEP", 1), "T"),
+        (("DEP", 1), ("DEP", 3), "I"),
+        (("DEP", 1), ("PAIN", 1), "I"),
+        (("DEP", 1), ("PAIN", 2), "I"),
+    ],
+)
+def test_arc_constraint(first: Variable, second: Variable, expected: str) -> None:
+    assert solve.arc_constraint(first, second) == expected

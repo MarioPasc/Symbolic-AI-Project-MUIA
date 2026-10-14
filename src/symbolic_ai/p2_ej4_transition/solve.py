@@ -39,6 +39,7 @@ from symbolic_ai.p2_ej4_transition.problem import TransitionProblem, Value
 __all__ = [
     "ALL_CONFIGS",
     "MAIN_CONFIG",
+    "ArcConstraint",
     "HorizonRun",
     "Inference",
     "ResultStatus",
@@ -51,6 +52,7 @@ __all__ = [
     "ValueOrder",
     "VariableOrder",
     "ac3_domains",
+    "arc_constraint",
     "find_min_horizon",
     "solve_horizon",
     "solve_min_conflicts",
@@ -69,9 +71,13 @@ RunStatus: TypeAlias = Literal["solved", "infeasible", "timeout", "budget", "not
 ResultStatus: TypeAlias = Literal["solved", "no_transition_within_h_max", "timeout", "budget"]
 #: What a trace event records (see :class:`TraceEvent`).
 TraceKind: TypeAlias = Literal["ac3", "select", "try", "prune", "wipeout", "backtrack", "solution"]
+#: The constraint family of an arc: T (same condition, consecutive days) or I (interaction window).
+ArcConstraint: TypeAlias = Literal["T", "I"]
 
 _Assignment: TypeAlias = dict[Variable, Value]
 _Removals: TypeAlias = list[tuple[Variable, Value]]
+#: An arc ``(Xi, Xj)`` of AC-3: the values of ``Xi`` are revised against the domain of ``Xj``.
+_Arc: TypeAlias = tuple[Variable, Variable]
 #: The signature of aima's inference functions: ``(csp, var, value, assignment, removals)``.
 _InferenceFunction: TypeAlias = Callable[[Any, Variable, Value, _Assignment, _Removals], bool]
 
@@ -235,7 +241,8 @@ class TraceEvent:
     step
         Position of the event in the trace (0, 1, 2, ...).
     kind
-        ``"ac3"``: the AC-3 preprocessing removed ``value`` from ``variable``. ``"select"``: the
+        ``"ac3"``: the AC-3 preprocessing removed ``value`` from ``variable`` while revising the
+        arc towards ``neighbour``. ``"select"``: the
         search chose ``variable``. ``"try"``: the search assigned ``value`` to ``variable`` (the
         value passed aima's check against the assigned neighbours; with forward checking or MAC
         every value left in a domain passes it). ``"prune"``: forward checking or MAC removed
@@ -248,6 +255,10 @@ class TraceEvent:
         The value concerned, or ``None``.
     detail
         A short explanation in words.
+    neighbour
+        For an ``"ac3"`` event, the other end ``Xj`` of the arc ``(variable, Xj)`` whose revision
+        removed ``value``: no value left in its domain supports it (see :func:`arc_constraint`
+        for the constraint between them). ``None`` for every other kind.
     """
 
     step: int
@@ -255,6 +266,29 @@ class TraceEvent:
     variable: Variable | None
     value: Value
     detail: str
+    neighbour: Variable | None = None
+
+
+def arc_constraint(variable: Variable, neighbour: Variable) -> ArcConstraint:
+    """Return the constraint family between two neighbours of the CSP (design §4.3).
+
+    ``"T"`` when they are the same condition on consecutive days (the constraint function then
+    checks T and also I, which only matters if two drugs of one condition interact); ``"I"``
+    otherwise (the interaction window is the only reason two such variables are neighbours, see
+    ``csp_builder.build_csp``).
+
+    Parameters
+    ----------
+    variable, neighbour
+        Two variables ``(condition_id, day)`` of the CSP.
+
+    Returns
+    -------
+    ArcConstraint
+        ``"T"`` or ``"I"``.
+    """
+    (condition_1, day_1), (condition_2, day_2) = variable, neighbour
+    return "T" if condition_1 == condition_2 and abs(day_1 - day_2) == 1 else "I"
 
 
 def solve_horizon(
@@ -458,21 +492,78 @@ def _record(
     variable: Variable | None,
     value: Value,
     detail: str,
+    neighbour: Variable | None = None,
 ) -> None:
     """Append one event to ``trace``; do nothing when the run is not traced."""
     if trace is not None:
-        trace.append(TraceEvent(len(trace), kind, variable, value, detail))
+        trace.append(TraceEvent(len(trace), kind, variable, value, detail, neighbour))
 
 
 def _preprocess(csp: Any, trace: list[TraceEvent] | None) -> tuple[bool, int]:
-    """Run aima's AC-3 on the whole CSP; return whether it is consistent and the values removed."""
+    """Run aima's AC-3 on the whole CSP; return whether it is consistent and the values removed.
+
+    The arc queue is :func:`_arc_order`'s, watched by an :class:`_ArcLog` so that the trace can
+    name the arc behind each removal; the arcs, their order and every count are unchanged.
+    """
     removals: _Removals = []
-    consistent, _checks = _ac3(csp, removals=removals)
-    for variable, value in removals:
-        _record(trace, "ac3", variable, value, "no support left in a neighbour's domain")
+    log = _ArcLog(removals)
+    consistent, _checks = aima_csp.AC3(csp, None, removals, arc_heuristic=log.order)
+    if trace is not None:
+        for index, (variable, value) in enumerate(removals):
+            neighbour = log.arc_of(index)[1]
+            condition, day = neighbour
+            detail = (
+                f"no support left in {condition} day {day} "
+                f"(constraint {arc_constraint(variable, neighbour)})"
+            )
+            _record(trace, "ac3", variable, value, detail, neighbour)
     if not consistent:
         _record(trace, "wipeout", _emptied(csp), None, "AC-3 emptied this domain: no solution")
     return bool(consistent), len(removals)
+
+
+class _ArcLog:
+    """AC-3's arc queue in :func:`_arc_order`, logging each arc it hands to aima's ``AC3``.
+
+    aima's ``AC3`` (``csp.py`` l.200) pops an arc ``(Xi, Xj)`` and revises it at once, and
+    ``revise`` (l.218) only removes values of ``Xi``, appending them to ``removals``. So every
+    removal made between two pops comes from the arc popped first: logging, at each pop, how many
+    removals there were before it is enough to name the arc of each removal. The log only
+    watches the queue; it pops and adds the same arcs as the plain :func:`_arc_order` queue.
+
+    Parameters
+    ----------
+    removals
+        The list aima's ``AC3`` appends its removals to.
+    """
+
+    def __init__(self, removals: _Removals) -> None:
+        self._removals = removals
+        self._queue: Any = None
+        self._pops: list[tuple[int, _Arc]] = []  # (removals before the pop, arc popped)
+
+    def order(self, csp: Any, queue: Any) -> _ArcLog:
+        """Order the arcs (aima's ``arc_heuristic`` of ``AC3``); the log then acts as the queue."""
+        self._queue = _arc_order(csp, queue)
+        return self
+
+    def __len__(self) -> int:
+        """Arcs left in the queue (aima's loop is ``while queue``)."""
+        return len(self._queue)
+
+    def add(self, arc: _Arc) -> None:
+        """Put an arc back in the queue."""
+        self._queue.add(arc)
+
+    def pop(self) -> _Arc:
+        """Take the next arc, logging it with the number of removals made so far."""
+        arc: _Arc = self._queue.pop()
+        self._pops.append((len(self._removals), arc))
+        return arc
+
+    def arc_of(self, removal: int) -> _Arc:
+        """Return the arc whose revision made removal number ``removal`` (from 0)."""
+        return next(arc for before, arc in reversed(self._pops) if before <= removal)
 
 
 def _ac3(csp: Any, queue: Any = None, removals: _Removals | None = None) -> tuple[bool, int]:
