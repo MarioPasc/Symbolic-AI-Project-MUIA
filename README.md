@@ -215,6 +215,7 @@ data 1.3.0: illustrative values, not clinical ones).
 conda activate symai
 
 python -m symbolic_ai.p2_ej4_transition.main --worked-example        # R1 as text
+python -m symbolic_ai.p2_ej4_transition.main --worked-example --miniature   # the slides' miniature (H* = 3), step by step
 python -m symbolic_ai.p2_ej4_transition.main --list --category knock_on
 python -m symbolic_ai.p2_ej4_transition.main --problem 'DEP|LIVER|+cond:PAIN'
 python -m symbolic_ai.p2_ej4_transition.main --experiments           # R1, R2, R3 (about 4 min)
