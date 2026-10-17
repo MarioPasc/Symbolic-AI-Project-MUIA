@@ -46,16 +46,16 @@ What to expect:
 Where each part of the slides comes from (`--experiments` is what `reproduce --only ej4` runs;
 the JSON sections are those of `outputs/ej4/results.json`):
 
-| what the slides show | command | file in `outputs/ej4/` | JSON section |
+| what the slides show (main or backup slides) | command | file in `outputs/ej4/` | JSON section |
 |---|---|---|---|
 | the case study's schedule, H\* = 12 (Gantt chart) | `--experiments`; as text, `--worked-example` | `fig_ej4_gantt.{pdf,png}` | `r1.schedule`, `r1.h_star` |
 | the domains after AC-3 at H = 11 (`DEP day 2` emptied) and at H = 12 | `--experiments`; as text, `--worked-example` | `tab_ej4_domains_h11.tex`, `tab_ej4_domains_h12.tex` | `r1.domains` (one per horizon: `cells`, `emptied`, `removed_by_ac3`, `run`) |
 | the miniature step by step: horizon loop, domains, AC-3 removals with their arcs, configurations, search trees, the oracle's daily states, schedule | `--worked-example --miniature` | none (printed only) | none |
 | R2, CSP vs checker vs oracle: real and synthetic problems, mutations, continuity with EJ3, categories, census | `--experiments` | `tab_ej4_r2.tex` | `r2` (`oracle`, `checker`, `three_way_agree`, `mutations`, `synthetic`, `continuity_with_ej3`, `categories`), `census` |
 | R3, the configuration comparison: four configurations at H\* - 1 and H\*, min-conflicts, the real knock-on population, the synthetic row | `--experiments` | `tab_ej4_r3.tex` | `r3` (`configurations`, `runs`, `min_conflicts`, `knock_on_population`, `synthetic_row`) |
-| the extended case `DEP+GERD+HTN+PAIN+T2D\|-\|+rf:LIVER` (5 conditions, H\* = 12) | `--experiments`; as text, `--problem 'DEP+GERD+HTN+PAIN+T2D\|-\|+rf:LIVER'` | `fig_ej4_gantt_extended.{pdf,png}` | `extended_case`; its R3 rows in `r3.runs` |
+| the extended case `DEP+GERD+HTN+PAIN+T2D\|-\|+rf:LIVER` (5 conditions, H\* = 12; in the full comparison table of the backup slides) | `--experiments`; as text, `--problem 'DEP+GERD+HTN+PAIN+T2D\|-\|+rf:LIVER'` | `fig_ej4_gantt_extended.{pdf,png}` | `extended_case`; its R3 rows in `r3.runs` |
 | how often the transition takes time: H\* counted in events | `--experiments` | — | `context.histogram` |
-| the aima-python code on the slides (AC-3, backtracking, forward checking) | — | `src/aima/csp.py`: `AC3` l.200, `revise` l.219, `forward_checking` l.428, `backtracking_search` l.449 | — |
+| the aima-python functions named on the methodology and pseudocode slides (AC-3, backtracking, forward checking) | — | `src/aima/csp.py`: `AC3` l.200, `revise` l.219, `forward_checking` l.428, `backtracking_search` l.449 | — |
 
 Every command above is `python -m symbolic_ai.p2_ej4_transition.main <options>` (or `symai-ej4
 <options>`); the EJ4 section below lists them all. `results.json` and the four `.tex` tables are
