@@ -6,6 +6,61 @@ built over one shared drug formulary and patient database (`data/`).
 
 Authors: Rodrigo Laso Mielgo and Mario Pascual González.
 
+## Práctica 2 (EJ4): quick start
+
+EJ4 plans the safe day-by-day transition between two drug regimens as a CSP indexed by day and
+solves it with aima-python's CSP algorithms ([details](#run--ej4-the-safe-transition-between-two-regimens-csp-práctica-2)).
+From the repository root (the folder that holds `environment.yml`):
+
+```bash
+conda env create -f environment.yml          # once: the `symai` environment (Python 3.12)
+conda activate symai
+python -m symbolic_ai.reproduce --only ej4   # every figure, table and number of the slides
+python -m symbolic_ai.p2_ej4_transition.main --worked-example --miniature   # the miniature, step by step
+```
+
+**A `symai` environment from Práctica 1 is not enough.** `conda env create` refuses to overwrite
+it, and its editable install still imports the Práctica 1 folder, which has no EJ4. Point it at
+this folder instead, from this folder: `conda env update -n symai -f environment.yml --prune`.
+Then `python -c "import symbolic_ai; print(symbolic_ai.__file__)"` must print a path inside this
+folder.
+
+The third command runs `python -m symbolic_ai.p2_ej4_transition.main --experiments` in one
+process, about 4 to 5 minutes (248 s on a 24-core workstation), and writes every file to
+`outputs/ej4/` (`--out-root DIR` writes to `DIR/ej4` instead). It prints the case study, then the
+headline numbers of R2 and R3, the files written, and a summary table (exit code 0, time, results
+file). The last command takes a few seconds and only prints (no file).
+
+What to expect:
+
+- the case study `DEP|LIVER|+cond:PAIN` (depression and severe liver disease, on sertraline; day 0:
+  chronic pain is diagnosed): **H\* = 12 days**: sertraline tapered on days 1-4, mirtazapine from
+  day 5, ibuprofen on day 12. At H = 11, AC-3 empties the domain of `DEP day 2`, which proves that
+  no shorter transition exists;
+- the miniature (the same patient with every washout 1 day and sertraline's taper 1 day):
+  **H\* = 3**, from the CSP and from the independent oracle; at H = 2, AC-3 empties `DEP day 1`;
+- R2: CSP = oracle = checker on 3,319/3,319 real problems (14,716 events) and on 1,500/1,500
+  synthetic ones; the checker rejects 42,221/42,221 targeted mutations with the rule each breaks.
+
+Where each part of the slides comes from (`--experiments` is what `reproduce --only ej4` runs;
+the JSON sections are those of `outputs/ej4/results.json`):
+
+| what the slides show | command | file in `outputs/ej4/` | JSON section |
+|---|---|---|---|
+| the case study's schedule, H\* = 12 (Gantt chart) | `--experiments`; as text, `--worked-example` | `fig_ej4_gantt.{pdf,png}` | `r1.schedule`, `r1.h_star` |
+| the domains after AC-3 at H = 11 (`DEP day 2` emptied) and at H = 12 | `--experiments`; as text, `--worked-example` | `tab_ej4_domains_h11.tex`, `tab_ej4_domains_h12.tex` | `r1.domains` (one per horizon: `cells`, `emptied`, `removed_by_ac3`, `run`) |
+| the miniature step by step: horizon loop, domains, AC-3 removals with their arcs, configurations, search trees, the oracle's daily states, schedule | `--worked-example --miniature` | none (printed only) | none |
+| R2, CSP vs checker vs oracle: real and synthetic problems, mutations, continuity with EJ3, categories, census | `--experiments` | `tab_ej4_r2.tex` | `r2` (`oracle`, `checker`, `three_way_agree`, `mutations`, `synthetic`, `continuity_with_ej3`, `categories`), `census` |
+| R3, the configuration comparison: four configurations at H\* - 1 and H\*, min-conflicts, the real knock-on population, the synthetic row | `--experiments` | `tab_ej4_r3.tex` | `r3` (`configurations`, `runs`, `min_conflicts`, `knock_on_population`, `synthetic_row`) |
+| the extended case `DEP+GERD+HTN+PAIN+T2D\|-\|+rf:LIVER` (5 conditions, H\* = 12) | `--experiments`; as text, `--problem 'DEP+GERD+HTN+PAIN+T2D\|-\|+rf:LIVER'` | `fig_ej4_gantt_extended.{pdf,png}` | `extended_case`; its R3 rows in `r3.runs` |
+| how often the transition takes time: H\* counted in events | `--experiments` | — | `context.histogram` |
+| the aima-python code on the slides (AC-3, backtracking, forward checking) | — | `src/aima/csp.py`: `AC3` l.200, `revise` l.219, `forward_checking` l.428, `backtracking_search` l.449 | — |
+
+Every command above is `python -m symbolic_ai.p2_ej4_transition.main <options>` (or `symai-ej4
+<options>`); the EJ4 section below lists them all. `results.json` and the four `.tex` tables are
+byte-identical from one run to the next (`provenance` records the git commit); `timings.json` holds
+the machine-dependent times.
+
 ## Install
 
 ```bash
@@ -14,10 +69,11 @@ conda env create -f environment.yml          # creates the `symai` environment, 
 conda env update -f environment.yml --prune
 ```
 
-Check the install:
+Check the install (the path printed must be inside this folder; if it is another copy of the
+repository, run the `conda env update` line above from this folder):
 
 ```bash
-conda run -n symai python -c "import aima.logic, symbolic_ai; print('ok')"
+conda run -n symai python -c "import aima.logic, symbolic_ai; print('ok', symbolic_ai.__file__)"
 ```
 
 ## Reproduce every result of the report
@@ -205,9 +261,10 @@ data 1.3.0: illustrative values, not clinical ones).
   of its taper, or untreated (only for a newly diagnosed condition). **Constraints**, all binary:
   the transition rule between consecutive days of a condition, and no interacting pair present on
   the same day (washouts included).
-- **Solver** (`aima.csp`, called unchanged): node consistency, AC-3, then backtracking with
-  forward checking and MRV (the main configuration); the horizon loop solves H = 0, 1, 2, ... and
-  the first solvable H is H* (the infeasible run at H* - 1 is the proof).
+- **Solver**: node consistency when the domains are built, then aima-python's AC-3 and its
+  backtracking search with forward checking and MRV (`aima.csp`, called unchanged; the main
+  configuration); the horizon loop solves H = 0, 1, 2, ... and the first solvable H is H* (the
+  infeasible run at H* - 1 is the proof).
 - **Validation**, independent of the CSP: a checker that replays the rules day by day and an
   oracle that searches the daily states breadth-first.
 
@@ -229,8 +286,8 @@ symai-ej4 --worked-example
 
 | file | content |
 |---|---|
-| `results.json` | schema `symai.ej4.results/1`, byte-identical across runs (no times): `r1` (the worked example `DEP|LIVER|+cond:PAIN`: data rows, domains before and after AC-3 at H = 11 and 12, the emptied domain, the trace and the schedule); `r2` (CSP against oracle and checker on every distinct real problem, `three_way_agree`; targeted mutations per checker rule; `synthetic`: the same three-way agreement on `synthetic.random_problems(2027, 1500)` with its coverage and H* distribution; `continuity_with_ej3`: R₀ against P1's EJ3 regimen on the 4,032 histories, with the companion history ids; `categories`: each category against the solved H*); `census`; `context` (H* counted in events); `r3` (plain BT, BT + FC, BT + FC + MRV and the main configuration at H* - 1 and H* on the worked example and on `DEP+GERD+HTN+PAIN+T2D|-|+rf:LIVER`, with a budget of 1,000,000 assignments; min-conflicts; `knock_on_population`: the four configurations on every real knock-on problem at H* - 1 with a budget of 100,000 assignments, median and budget hits; `synthetic_row`: how often AC-3 alone refutes H* - 1 and how often the search backtracks at H* on the synthetic batch); `extended_case`; `provenance` |
-| `timings.json` | wall-clock time of each phase (R2 and its synthetic batch, the continuity run of about 55 s, the population row, R3) and each R3 run (machine-dependent) |
+| `results.json` | schema `symai.ej4.results/1`, byte-identical across runs (no times; `provenance` records the git commit): `r1` (the worked example `DEP\|LIVER\|+cond:PAIN`: data rows, domains before and after AC-3 at H = 11 and 12, the emptied domain, the trace and the schedule); `r2` (CSP against oracle and checker on every distinct real problem, `three_way_agree`; targeted mutations per checker rule; `synthetic`: the same three-way agreement on `synthetic.random_problems(2027, 1500)` with its coverage and H* distribution; `continuity_with_ej3`: R₀ against P1's EJ3 regimen on the 4,032 histories, with the companion history ids; `categories`: each category against the solved H*); `census`; `context` (H* counted in events); `r3` (plain BT, BT + FC, BT + FC + MRV and the main configuration at H* - 1 and H* on the worked example and on `DEP+GERD+HTN+PAIN+T2D\|-\|+rf:LIVER`, with a budget of 1,000,000 assignments; min-conflicts; `knock_on_population`: the four configurations on every real knock-on problem at H* - 1 with a budget of 100,000 assignments, median and budget hits; `synthetic_row`: how often AC-3 alone refutes H* - 1 and how often the search backtracks at H* on the synthetic batch); `extended_case`; `provenance` |
+| `timings.json` | wall-clock time of each phase (R2 and its synthetic batch, the continuity run of under a minute, the population row of about 2 minutes, R3) and each R3 run (machine-dependent) |
 | `fig_ej4_gantt.{pdf,png}`, `fig_ej4_gantt_extended.{pdf,png}` | the schedules as Gantt charts, sized for a 16:9 slide |
 | `tab_ej4_domains_h11.tex`, `tab_ej4_domains_h12.tex`, `tab_ej4_r2.tex`, `tab_ej4_r3.tex` | booktabs fragments to `\input` in the beamer slides (need `booktabs` and `xcolor`); the first line of the domain and R3 tables is the caption-ready legend |
 
@@ -291,11 +348,14 @@ in its docstring.
   A* and consistency §3.5.2, IDA* §3.5.5, heuristics from relaxed problems §3.6.2, and one
   condition branched per node as in backtracking search for CSPs §5.3.
 - EJ4: aima-python's `CSP`, `AC3`, `backtracking_search`, `first_unassigned_variable`,
-  `num_legal_values`, `unordered_domain_values`, `lcv`, `no_inference`, `forward_checking`, `mac`
-  and `min_conflicts` (same vendored copy), called unchanged, and its `breadth_first_graph_search`
-  loop for the oracle. Constraint satisfaction follows ch. 5 of *Artificial Intelligence: A Modern
-  Approach* (4th ed.): AC-3 §5.2, backtracking, ordering and inference §5.3, min-conflicts §5.4;
-  bounded planning as a CSP, 3rd ed. §10.4.3.
+  `num_legal_values`, `lcv`, `no_inference`, `forward_checking`, `mac` and `min_conflicts` (same
+  vendored copy), called unchanged from `p2_ej4_transition/csp_builder.py` and `solve.py`; the
+  wrappers there only add deterministic tie-breaks (MRV, AC-3's arc order, a keep-first value order
+  in place of `unordered_domain_values`), budgets and a trace. The oracle's breadth-first search
+  (`oracle.py`) is written after aima-python's `breadth_first_graph_search`, which the tests run on
+  the same search problem as a cross-check. Constraint satisfaction follows ch. 5 of *Artificial
+  Intelligence: A Modern Approach* (4th ed.): AC-3 §5.2, backtracking, ordering and inference §5.3,
+  min-conflicts §5.4; breadth-first search §3.4.1; bounded planning as a CSP, 3rd ed. §10.4.3.
 - **owlready2** 0.51, https://pypi.org/project/owlready2/ (J.-B. Lamy, *Artificial Intelligence in
   Medicine* 80, 2017), LGPL-3.0-or-later, with the bundled **HermiT** 1.3.8 OWL 2 reasoner
   (B. Glimm, I. Horrocks, B. Motik, G. Stoilos, Z. Wang, *J. Automated Reasoning* 53(3), 2014),
