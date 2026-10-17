@@ -248,11 +248,10 @@ class TraceEvent:
         Position of the event in the trace (0, 1, 2, ...).
     kind
         ``"ac3"``: the AC-3 preprocessing removed ``value`` from ``variable`` while revising the
-        arc towards ``neighbour``. ``"select"``: the
-        search chose ``variable``. ``"try"``: the search assigned ``value`` to ``variable`` (the
-        value passed aima's check against the assigned neighbours; with forward checking or MAC
-        every value left in a domain passes it). ``"prune"``: forward checking or MAC removed
-        ``value`` from ``variable``.
+        arc towards ``neighbour``. ``"select"``: the search chose ``variable``. ``"try"``: the
+        search assigned ``value`` to ``variable`` (the value passed aima's check against the
+        assigned neighbours; with forward checking or MAC every value left in a domain passes
+        it). ``"prune"``: forward checking or MAC removed ``value`` from ``variable``.
         ``"wipeout"``: the domain of ``variable`` became empty. ``"backtrack"``: every value of
         ``variable`` failed, so the search goes back. ``"solution"``: every variable is assigned.
     variable
@@ -612,7 +611,11 @@ class _AssignmentBudgetError(SolverError):
 def _variable_selector(
     config: SolverConfig, trace: list[TraceEvent] | None, deadline: float
 ) -> Callable[[_Assignment, Any], Variable]:
-    """Return the variable-selection function of the configuration, with the timeout check."""
+    """Return the variable-selection function of the configuration, with the budget checks.
+
+    aima's ``backtrack`` calls it before each assignment, so it is also where the assignment
+    budget and the clock are checked.
+    """
 
     def select(assignment: _Assignment, csp: Any) -> Variable:
         # The budget is checked before the clock, so a run it stops ends the same way everywhere.
