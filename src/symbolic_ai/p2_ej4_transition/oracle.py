@@ -27,7 +27,15 @@ from symbolic_ai.p2_ej4_transition.problem import (
     is_full_dose,
 )
 
-__all__ = ["DailyState", "DailyStateProblem", "OracleResult", "OracleStatus", "oracle_min_horizon"]
+__all__ = [
+    "H_MAX",
+    "MAX_STATES",
+    "DailyState",
+    "DailyStateProblem",
+    "OracleResult",
+    "OracleStatus",
+    "oracle_min_horizon",
+]
 
 #: ``found``: H* is known; ``impossible``: every reachable state was seen and none is a goal;
 #: ``budget_exhausted``: the search stopped at ``max_states`` expansions or at depth ``h_max``.
@@ -35,6 +43,13 @@ OracleStatus: TypeAlias = Literal["found", "impossible", "budget_exhausted"]
 
 #: The values given to every condition on one day, in ``problem.conditions`` order.
 DayValues: TypeAlias = tuple[Value, ...]
+
+#: The deepest day the oracle searches by default: the CSP's cap of design §4.4, kept here as a
+#: number of its own so that the oracle does not import the CSP side.
+H_MAX = 60
+#: The most daily states the oracle expands by default (no real or synthetic problem of R2 reaches
+#: it: ``budget_exhausted`` is 0 in ``results.json``).
+MAX_STATES = 200_000
 
 
 class DailyState(NamedTuple):
@@ -199,7 +214,7 @@ class DailyStateProblem:
 
 
 def oracle_min_horizon(
-    problem: TransitionProblem, h_max: int = 60, max_states: int = 200_000
+    problem: TransitionProblem, h_max: int = H_MAX, max_states: int = MAX_STATES
 ) -> OracleResult:
     """Return the minimum horizon H* of ``problem`` by breadth-first search over daily states.
 

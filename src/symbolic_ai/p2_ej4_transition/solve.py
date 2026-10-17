@@ -38,6 +38,7 @@ from symbolic_ai.p2_ej4_transition.problem import TransitionProblem, Value
 
 __all__ = [
     "ALL_CONFIGS",
+    "H_MAX",
     "MAIN_CONFIG",
     "ArcConstraint",
     "HorizonRun",
@@ -147,6 +148,11 @@ class SolverConfig:
 
 #: The main configuration: consistency, then search (deck 04 l.43-57): AC-3 + BT + FC + MRV.
 MAIN_CONFIG = SolverConfig()
+
+#: The last horizon the horizon loop tries by default (design §4.4): a cap, not a bound. No real
+#: instance comes near it (their largest H* is 12); beyond it the answer is "not found within
+#: H_MAX days", never "impossible".
+H_MAX = 60
 
 #: Every complete configuration (3 inferences x 2 variable orders x 2 value orders x AC-3 or not).
 ALL_CONFIGS: tuple[SolverConfig, ...] = tuple(
@@ -338,7 +344,7 @@ def solve_horizon(
 
 
 def find_min_horizon(
-    problem: TransitionProblem, config: SolverConfig = MAIN_CONFIG, h_max: int = 60
+    problem: TransitionProblem, config: SolverConfig = MAIN_CONFIG, h_max: int = H_MAX
 ) -> TransitionResult:
     """Return the minimum horizon H* by solving H = 0, 1, 2, ... (the horizon loop, design §4.4).
 
@@ -526,7 +532,7 @@ class _ArcLog:
     """AC-3's arc queue in :func:`_arc_order`, logging each arc it hands to aima's ``AC3``.
 
     aima's ``AC3`` (``csp.py`` l.200) pops an arc ``(Xi, Xj)`` and revises it at once, and
-    ``revise`` (l.218) only removes values of ``Xi``, appending them to ``removals``. So every
+    ``revise`` (l.219) only removes values of ``Xi``, appending them to ``removals``. So every
     removal made between two pops comes from the arc popped first: logging, at each pop, how many
     removals there were before it is enough to name the arc of each removal. The log only
     watches the queue; it pops and adds the same arcs as the plain :func:`_arc_order` queue.
