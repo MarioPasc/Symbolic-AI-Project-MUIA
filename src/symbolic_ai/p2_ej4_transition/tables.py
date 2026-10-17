@@ -1,12 +1,12 @@
 r"""LaTeX tables of EJ4 for the beamer slides (booktabs fragments to ``\input``, no preamble).
 
-Four fragments (design §7, §11):
+Four fragments (design §7):
 
 - ``tab_ej4_domains_h11.tex`` and ``tab_ej4_domains_h12.tex``: the worked example's domains after
   AC-3 at ``H* - 1`` and ``H*``, conditions by days, with the values AC-3 removed in gray and the
-  emptied domain marked (R1, slide 10);
-- ``tab_ej4_r2.tex``: the validation summary and the mutations per rule (R2, slide 12);
-- ``tab_ej4_r3.tex``: the algorithm table on the two real instances (R3, slide 13).
+  emptied domain marked (R1);
+- ``tab_ej4_r2.tex``: the validation summary and the mutations per rule (R2);
+- ``tab_ej4_r3.tex``: the algorithm table on the two real instances (R3).
 
 Every visible word comes from one label dictionary (:data:`LABELS_ES`, Spanish, the language of
 the talk), so another dictionary with the same keys switches the language. The fragments need

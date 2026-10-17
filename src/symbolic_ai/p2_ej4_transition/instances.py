@@ -9,9 +9,8 @@ applies P1's co-prescription rule exactly within one drug per condition (D23, se
 2720 histories where that regimen has one drug per condition; on the other 32 EJ3 adds omeprazole
 as ibuprofen's companion under AGE65 without GERD, which one drug per condition cannot express, and
 EJ4 has no safe regimen; on the 1280 histories EJ3 refers, EJ4 has none either
-(:func:`continuity_with_ej3`). An *event* is a
-risk factor or a condition the history lacks (D20). Each
-(history, event) pair is classified before any solving:
+(:func:`continuity_with_ej3`). An *event* is a risk factor or a condition the history lacks
+(D20). Each (history, event) pair is classified before any solving:
 
 - ``REFER``: no safe regimen exists after the event, so there is nothing to transition to;
 - ``TRIVIAL``: a new risk factor leaves every drug of ``R_0`` acceptable (``H* = 0``);
