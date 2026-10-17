@@ -26,7 +26,8 @@ Then `python -c "import symbolic_ai; print(symbolic_ai.__file__)"` must print a 
 folder.
 
 The third command runs `python -m symbolic_ai.p2_ej4_transition.main --experiments` in one
-process, about 4 to 5 minutes (248 s on a 24-core workstation), and writes every file to
+process, about 4 to 5 minutes (250 to 300 s in our runs on a 24-core workstation; one core is
+used), and writes every file to
 `outputs/ej4/` (`--out-root DIR` writes to `DIR/ej4` instead). It prints the case study, then the
 headline numbers of R2 and R3, the files written, and a summary table (exit code 0, time, results
 file). The last command takes a few seconds and only prints (no file).
