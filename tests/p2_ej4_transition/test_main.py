@@ -36,8 +36,22 @@ CASE_STUDY_ID = "DEP|LIVER|+cond:PAIN"
 
 @pytest.mark.parametrize(
     "argv",
-    [[], ["--list", "--worked-example"], ["--worked-example", "--category", "trivial"]],
-    ids=["no mode", "two modes", "category without list"],
+    [
+        [],
+        ["--list", "--worked-example"],
+        ["--worked-example", "--category", "trivial"],
+        ["--worked-example", "--no-oracle"],
+        ["--list", "--out-dir", "somewhere"],
+        ["--worked-example", "--no-such-option"],
+    ],
+    ids=[
+        "no mode",
+        "two modes",
+        "category without list",
+        "no-oracle without experiments",
+        "out-dir without experiments",
+        "unknown option",
+    ],
 )
 def test_invalid_arguments_exit_with_2(argv: list[str]) -> None:
     with pytest.raises(SystemExit) as excinfo:
@@ -48,6 +62,26 @@ def test_invalid_arguments_exit_with_2(argv: list[str]) -> None:
 def test_refer_is_not_a_listable_category() -> None:
     with pytest.raises(SystemExit):
         cli.main(["--list", "--category", "refer"])
+
+
+def test_missing_data_dir_is_a_one_line_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main(["--worked-example", "--data-dir", str(tmp_path / "nowhere")]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and "nowhere" in err
+    assert len(err.splitlines()) == 1  # a message, not a traceback
+
+
+def test_unusable_out_dir_fails_before_solving(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    a_file = tmp_path / "results.json"
+    a_file.write_text("{}", encoding="utf-8")
+    assert cli.main(["--experiments", "--out-dir", str(a_file)]) == 1
+    captured = capsys.readouterr()
+    assert captured.err.startswith("error: ") and len(captured.err.splitlines()) == 1
+    assert captured.out == ""  # nothing was computed before the directory was checked
 
 
 # --- modes on the real data ---------------------------------------------------------------------

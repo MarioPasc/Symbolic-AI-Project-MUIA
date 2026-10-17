@@ -115,11 +115,42 @@ R3_BUDGET = 1_000_000
 #: R3's wall-clock safety net; the budget, not the clock, is meant to stop plain backtracking.
 R3_TIMEOUT_S = 60.0
 
-#: The configurations of R3, in table order: each adds one technique of deck 04 to the previous.
+#: The configurations of R3, in table order: each adds one technique of deck 04 to the previous
+#: (plain backtracking; + forward checking; + MRV; + AC-3 before the search = the main one).
 R3_CONFIGS: tuple[tuple[str, SolverConfig], ...] = (
-    ("bt", SolverConfig("none", "static", "keep_first", False, R3_TIMEOUT_S, R3_BUDGET)),
-    ("bt_fc", SolverConfig("fc", "static", "keep_first", False, R3_TIMEOUT_S, R3_BUDGET)),
-    ("bt_fc_mrv", SolverConfig("fc", "mrv", "keep_first", False, R3_TIMEOUT_S, R3_BUDGET)),
+    (
+        "bt",
+        SolverConfig(
+            inference="none",
+            variable_order="static",
+            value_order="keep_first",
+            ac3_preprocess=False,
+            timeout_s=R3_TIMEOUT_S,
+            max_assignments=R3_BUDGET,
+        ),
+    ),
+    (
+        "bt_fc",
+        SolverConfig(
+            inference="fc",
+            variable_order="static",
+            value_order="keep_first",
+            ac3_preprocess=False,
+            timeout_s=R3_TIMEOUT_S,
+            max_assignments=R3_BUDGET,
+        ),
+    ),
+    (
+        "bt_fc_mrv",
+        SolverConfig(
+            inference="fc",
+            variable_order="mrv",
+            value_order="keep_first",
+            ac3_preprocess=False,
+            timeout_s=R3_TIMEOUT_S,
+            max_assignments=R3_BUDGET,
+        ),
+    ),
     (
         "main",
         dataclasses.replace(MAIN_CONFIG, timeout_s=R3_TIMEOUT_S, max_assignments=R3_BUDGET),
@@ -744,6 +775,7 @@ def mutate_day0(problem: TransitionProblem, schedule: Schedule, horizon: int) ->
     Day 0 is the regimen before the event (rule *day0*): the start drug at full dose, or untreated
     for the newly diagnosed condition.
     """
+    del horizon  # every generator gets (problem, schedule, horizon); day 0 does not depend on H
     mutants: list[Mutant] = []
     for condition in problem.conditions:
         start = problem.start[condition]

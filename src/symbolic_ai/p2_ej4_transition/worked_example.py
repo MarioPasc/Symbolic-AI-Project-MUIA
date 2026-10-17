@@ -11,8 +11,9 @@ R1 is the centre of the talk. It follows one instance, the case study ``DEP|LIVE
 4. AC-3 at ``H*``: what is left for the search;
 5. the search trace and the schedule at ``H*``, checked by the independent checker.
 
-Everything is computed by the modules of wave 1 (``csp_builder``, ``solve``, ``checker``); this
-module only collects it into frozen records that serialise to JSON. Design:
+Everything is computed by the model, solver and verification modules (``csp_builder``,
+``solve``, ``checker``, ``oracle``); this module only collects it into frozen records that
+serialise to JSON. Design:
 ``code/docs/SPECIFICATIONS/EJ4-transition/README.md`` §1, §4.2, §7 R1 (private docs).
 
 The second part of the module is the *miniature* of the slides (``slides-and-guide.md`` §3): the
@@ -877,7 +878,7 @@ class Walkthrough:
 
 
 def miniature_problem(problem: TransitionProblem) -> TransitionProblem:
-    """Return the miniature of ``problem``: the didactic variant of the slides (S3).
+    """Return the miniature of ``problem``: the didactic variant the slides use (H* = 3).
 
     Every washout becomes :data:`MINIATURE_WASHOUT_DAYS` (1) and every taper
     :data:`MINIATURE_TAPER_DAYS` (0), except the taper of the start drugs,
@@ -1062,7 +1063,7 @@ def _rejection(
 ) -> TreeStep:
     """Return the step of a value rejected by aima's check, with the neighbours it conflicts with.
 
-    The neighbours are those aima's ``nconflicts`` (``csp.py`` l.79) counts: assigned and not
+    The neighbours are those aima's ``nconflicts`` (``csp.py`` l.94) counts: assigned and not
     satisfying the constraint with ``variable = value``, in static order.
     """
     conflicts = ", ".join(

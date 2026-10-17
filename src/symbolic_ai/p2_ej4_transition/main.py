@@ -30,6 +30,7 @@ from pathlib import Path
 
 import symbolic_ai
 from symbolic_ai.dataloader import (
+    DataLoaderError,
     DrugCost,
     Formulary,
     Pharmacokinetics,
@@ -178,8 +179,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--out-dir",
         type=Path,
-        default=_DEFAULT_OUT_DIR,
-        help=f"Output directory of --experiments (default: {_DEFAULT_OUT_DIR}).",
+        default=None,
+        help=f"With --experiments: the output directory (default: {_DEFAULT_OUT_DIR}).",
     )
     parser.add_argument(
         "--data-dir",
@@ -495,6 +496,9 @@ def _experiments(args: argparse.Namespace) -> int:
     """Mode ``--experiments``: R1, R2, R3, figures and tables; write the results."""
     clock = time.perf_counter
     started = clock()
+    # Created first, so that an unusable directory fails now and not after minutes of solving.
+    out_dir: Path = args.out_dir or _DEFAULT_OUT_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
     formulary, costs, pharmacokinetics = _load(args.data_dir)
     entries = enumerate_problems(formulary, costs, pharmacokinetics)
     names = _drug_names(formulary)
@@ -541,8 +545,6 @@ def _experiments(args: argparse.Namespace) -> int:
     _print_extensions(extensions)
 
     phase = clock()
-    out_dir: Path = args.out_dir
-    out_dir.mkdir(parents=True, exist_ok=True)
     extended_table = ScheduleTable.from_schedule(
         extended, extended_result.schedule, extended_result.h_star
     )
@@ -621,14 +623,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     Returns
     -------
     int
-        Process exit code: ``0`` on success, ``1`` for an unknown problem or an EJ4 error.
+        Process exit code: ``0`` on success; ``1`` for an unknown problem, an EJ4 error, a
+        database that cannot be read or an output directory that cannot be written (one line
+        ``error: ...`` on stderr, no traceback); ``2`` for invalid arguments (argparse).
     """
     parser = build_arg_parser()
     args = parser.parse_args(argv)
-    if args.category is not None and not args.list:
-        parser.error("--category needs --list")
-    if args.miniature and not args.worked_example:
-        parser.error("--miniature needs --worked-example")
+    _check_option_combinations(parser, args)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     try:
         if args.experiments:
@@ -646,9 +647,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.list:
             return _list(entries, args.category)
         return _solve_one(entries, args.problem)
-    except EJ4Error as exc:
+    except (EJ4Error, DataLoaderError, OSError) as exc:
+        # The CLI boundary: a bad --data-dir or --out-dir is the user's error, not a crash.
         print(f"error: {exc}", file=sys.stderr)
         return 1
+
+
+def _check_option_combinations(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Reject an option that its mode would silently ignore (``parser.error`` exits with 2)."""
+    if args.category is not None and not args.list:
+        parser.error("--category needs --list")
+    if args.miniature and not args.worked_example:
+        parser.error("--miniature needs --worked-example")
+    if args.no_oracle and not args.experiments:
+        parser.error("--no-oracle needs --experiments")
+    if args.out_dir is not None and not args.experiments:
+        parser.error("--out-dir needs --experiments")
 
 
 if __name__ == "__main__":
